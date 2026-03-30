@@ -80,6 +80,180 @@ const isProbablyAudioEssence = (name: string, content?: Uint8Array) => {
   return signature === "RIFF" || signature === "FORM" || signature === "fLaC";
 };
 
+const isLikelyMetadataOnlyEntry = (entry: AafEntry) => {
+  if (!entry.content) {
+    return true;
+  }
+
+  if (entry.size < MIN_AUDIO_PROBE_BYTES) {
+    return true;
+  }
+
+  const normalizedPath = normalizeName(entry.path);
+  return [
+    "properties",
+    "property",
+    "dictionary",
+    "header",
+    "preface",
+    "contentstorage",
+    "identification",
+    "locator",
+    "descriptor",
+    "mobs",
+    "mob",
+    "slot",
+    "index",
+  ].some((token) => normalizedPath.includes(token));
+};
+
+const getFallbackAudioCandidates = (entries: AafEntry[]) => {
+  return entries
+    .filter(
+      (entry) =>
+        entry.content && !isProbablyAudioEssence(entry.name, entry.content),
+    )
+    .filter((entry) => !isLikelyMetadataOnlyEntry(entry))
+    .sort((left, right) => {
+      const leftEssenceBoost = Number(
+        normalizeName(left.path).includes("essence"),
+      );
+      const rightEssenceBoost = Number(
+        normalizeName(right.path).includes("essence"),
+      );
+
+      if (rightEssenceBoost !== leftEssenceBoost) {
+        return rightEssenceBoost - leftEssenceBoost;
+      }
+
+      return right.size - left.size;
+    });
+};
+
+const toArrayBuffer = (content: Uint8Array) => {
+  return content.slice().buffer as ArrayBuffer;
+};
+
+const probeDecodableAudioEntries = async (entries: AafEntry[]) => {
+  const decodedEntries: DecodedAafAudioEntry[] = [];
+  const failedPaths: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry.content) {
+      continue;
+    }
+
+    try {
+      const analysis = await analyzeAudioData(toArrayBuffer(entry.content));
+      decodedEntries.push({ entry, analysis });
+    } catch {
+      failedPaths.push(entry.path);
+    }
+  }
+
+  return {
+    decodedEntries,
+    failedPaths,
+  };
+};
+
+const getPathFileName = (value: string) => {
+  const segments = value.split(/[\\/]+/).filter(Boolean);
+  return (segments[segments.length - 1] ?? value).toLowerCase();
+};
+
+const collectExternalMediaReferences = (entries: AafEntry[]) => {
+  const references = new Set<string>();
+
+  entries.forEach((entry) => {
+    if (!entry.content || isProbablyAudioEssence(entry.name, entry.content)) {
+      return;
+    }
+
+    const utf16Strings = extractStringRuns(decodeUtf16Le(entry.content));
+    const latinStrings = extractStringRuns(decodeLatin1(entry.content));
+    const strings = Array.from(new Set([...utf16Strings, ...latinStrings]));
+
+    strings.forEach((value) => {
+      const matches = value.matchAll(EXTERNAL_AUDIO_REFERENCE_PATTERN);
+      for (const match of matches) {
+        const candidate = match[1]?.trim();
+        if (candidate) {
+          references.add(candidate);
+        }
+      }
+    });
+  });
+
+  return Array.from(references);
+};
+
+const isSupportedCompanionAudioFile = (file: File) => {
+  return (
+    file.type.startsWith("audio/") ||
+    /\.(wav|aif|aiff|caf|flac|mp3|m4a|aac)$/i.test(file.name)
+  );
+};
+
+const getCompanionFilePath = (file: File) => {
+  const relativePath =
+    "webkitRelativePath" in file ? file.webkitRelativePath : "";
+  return relativePath || file.name;
+};
+
+const probeCompanionAudioFiles = async (files: File[]) => {
+  const decodedEntries: DecodedCompanionAudioEntry[] = [];
+
+  for (const file of files) {
+    if (!isSupportedCompanionAudioFile(file)) {
+      continue;
+    }
+
+    try {
+      const audioData = await file.arrayBuffer();
+      const analysis = await analyzeAudioData(audioData.slice(0));
+      const path = getCompanionFilePath(file);
+
+      decodedEntries.push({
+        entry: {
+          name: file.name,
+          path,
+          size: file.size,
+          pathTokens: tokenizePath(path),
+        },
+        analysis,
+        audioData,
+        audioFileName: file.name,
+        audioMimeType: file.type || inferAudioMimeType(file.name),
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return decodedEntries;
+};
+
+const matchCompanionEntriesToReferences = (
+  entries: DecodedCompanionAudioEntry[],
+  references: string[],
+) => {
+  if (references.length === 0) {
+    return entries;
+  }
+
+  const referenceNames = new Set(
+    references.map((reference) => getPathFileName(reference)),
+  );
+  const matchedEntries = entries.filter((entry) => {
+    const fileName = getPathFileName(entry.audioFileName);
+    const entryPathName = getPathFileName(entry.entry.path);
+    return referenceNames.has(fileName) || referenceNames.has(entryPathName);
+  });
+
+  return matchedEntries.length > 0 ? matchedEntries : entries;
+};
+
 type CfbEntry = {
   name?: string;
   content?: Uint8Array | number[];
@@ -119,6 +293,23 @@ interface AafMetadataHint {
   rate?: number;
   rateKind?: RateKind;
 }
+
+interface DecodedAafAudioEntry {
+  entry: AafEntry;
+  analysis: Awaited<ReturnType<typeof analyzeAudioData>>;
+}
+
+interface DecodedCompanionAudioEntry {
+  entry: AafEntry;
+  analysis: Awaited<ReturnType<typeof analyzeAudioData>>;
+  audioData: ArrayBuffer;
+  audioFileName: string;
+  audioMimeType?: string;
+}
+
+const MIN_AUDIO_PROBE_BYTES = 4096;
+const EXTERNAL_AUDIO_REFERENCE_PATTERN =
+  /([A-Za-z0-9 _./\\:-]+\.(?:wav|aif|aiff|caf|flac|mp3|m4a|aac))/gi;
 
 const toUint8Array = (content?: Uint8Array | number[]) => {
   if (!content) {
@@ -565,7 +756,10 @@ const toDebugHintInfo = (
   };
 };
 
-export const importAafFile = async (file: File): Promise<Project> => {
+export const importAafFile = async (
+  file: File,
+  companionFiles: File[] = [],
+): Promise<Project> => {
   const cfbModule = await import("cfb");
   const arrayBuffer = await file.arrayBuffer();
   const container = (
@@ -590,88 +784,136 @@ export const importAafFile = async (file: File): Promise<Project> => {
     } satisfies AafEntry;
   });
 
-  const audioEntries = allEntries.filter((entry) =>
+  const detectedAudioEntries = allEntries.filter((entry) =>
     isProbablyAudioEssence(entry.name, entry.content),
   );
 
   const { hints: rawMetadataHints, rateCandidates } =
     collectMetadataHints(allEntries);
   const metadataHints = enrichHintsWithRates(rawMetadataHints, rateCandidates);
+  const externalMediaReferences = collectExternalMediaReferences(allEntries);
 
-  if (audioEntries.length === 0) {
+  const fallbackCandidates =
+    detectedAudioEntries.length === 0
+      ? getFallbackAudioCandidates(allEntries)
+      : [];
+
+  const { decodedEntries, failedPaths } = await probeDecodableAudioEntries(
+    detectedAudioEntries.length > 0 ? detectedAudioEntries : fallbackCandidates,
+  );
+
+  const companionDecodedEntries =
+    decodedEntries.length === 0 && companionFiles.length > 0
+      ? matchCompanionEntriesToReferences(
+          await probeCompanionAudioFiles(companionFiles),
+          externalMediaReferences,
+        )
+      : [];
+
+  if (decodedEntries.length === 0 && companionDecodedEntries.length === 0) {
+    const attemptedCount =
+      detectedAudioEntries.length > 0
+        ? detectedAudioEntries.length
+        : fallbackCandidates.length;
+    const samplePaths = failedPaths.slice(0, 3).join(", ");
+
     throw new Error(
-      "AAF import currently supports audio-essence extraction only, and no supported essence was found.",
+      companionFiles.length > 0
+        ? "AAF import found no embedded essence and could not match any companion audio files. Select the exported AAF together with its audio files or the whole export folder."
+        : attemptedCount > 0
+          ? `AAF import could not decode any embedded audio essence. Attempted ${attemptedCount} stream${attemptedCount === 1 ? "" : "s"}${samplePaths ? ` (${samplePaths})` : ""}.`
+          : "AAF import found no embedded essence. Logic Pro often exports external media, so import the AAF together with its audio files or select the entire export folder.",
     );
   }
 
   const debugHints: AafImportDebugHint[] = [];
 
+  const resolvedAudioEntries =
+    decodedEntries.length > 0
+      ? decodedEntries.map(({ entry, analysis }) => ({
+          entry,
+          analysis,
+          audioData: toArrayBuffer(entry.content!),
+          audioFileName: entry.name,
+          audioMimeType: inferAudioMimeType(entry.name, entry.content),
+        }))
+      : companionDecodedEntries;
+
   const tracks: ProjectTrack[] = await Promise.all(
-    audioEntries.map(async (entry, index) => {
-      const audioData = entry.content!;
-      const arrayBufferView = audioData.slice().buffer as ArrayBuffer;
-      const analysis = await analyzeAudioData(arrayBufferView);
-      const { hint, matchedBy } = findBestHint(entry, metadataHints, index);
-      const startTime = Math.max(
-        0,
-        resolveTimingValue(
-          hint?.startRawValue,
-          hint?.startLabel,
-          hint?.rate,
-          analysis.duration,
-          false,
-        ) ?? 0,
-      );
-      const resolvedDuration =
-        resolveTimingValue(
-          hint?.durationRawValue,
-          hint?.durationLabel,
-          hint?.rate,
-          analysis.duration,
-          true,
-        ) ?? analysis.duration;
-      const clipDuration = Math.max(
-        0.01,
-        Math.min(resolvedDuration, analysis.duration),
-      );
-      const trackName =
-        hint?.trackName || entry.name || `AAF Track ${index + 1}`;
-
-      if (hint) {
-        debugHints.push(
-          toDebugHintInfo(hint, entry.name, matchedBy, startTime, clipDuration),
+    resolvedAudioEntries.map(
+      async (
+        { entry, analysis, audioData, audioFileName, audioMimeType },
+        index,
+      ) => {
+        const arrayBufferView = audioData;
+        const { hint, matchedBy } = findBestHint(entry, metadataHints, index);
+        const startTime = Math.max(
+          0,
+          resolveTimingValue(
+            hint?.startRawValue,
+            hint?.startLabel,
+            hint?.rate,
+            analysis.duration,
+            false,
+          ) ?? 0,
         );
-      }
+        const resolvedDuration =
+          resolveTimingValue(
+            hint?.durationRawValue,
+            hint?.durationLabel,
+            hint?.rate,
+            analysis.duration,
+            true,
+          ) ?? analysis.duration;
+        const clipDuration = Math.max(
+          0.01,
+          Math.min(resolvedDuration, analysis.duration),
+        );
+        const trackName =
+          hint?.trackName || entry.name || `AAF Track ${index + 1}`;
 
-      return {
-        id: createId(),
-        name: trackName,
-        type: "audio",
-        clips: [
-          {
-            id: createId(),
-            name: trackName || `Clip ${index + 1}`,
-            startTime,
-            duration: clipDuration,
-            notes: [],
-            audioData: arrayBufferView,
-            audioFileName: entry.name,
-            audioMimeType: inferAudioMimeType(entry.name, audioData),
-            audioOffset: 0,
-            sourceDuration: analysis.duration,
-            waveformData: analysis.waveformData,
+        if (hint) {
+          debugHints.push(
+            toDebugHintInfo(
+              hint,
+              entry.name,
+              matchedBy,
+              startTime,
+              clipDuration,
+            ),
+          );
+        }
+
+        return {
+          id: createId(),
+          name: trackName,
+          type: "audio",
+          clips: [
+            {
+              id: createId(),
+              name: trackName || `Clip ${index + 1}`,
+              startTime,
+              duration: clipDuration,
+              notes: [],
+              audioData: arrayBufferView,
+              audioFileName,
+              audioMimeType,
+              audioOffset: 0,
+              sourceDuration: analysis.duration,
+              waveformData: analysis.waveformData,
+            },
+          ],
+          volume: 0.8,
+          pan: 0,
+          muted: false,
+          solo: false,
+          instrument: {
+            type: "sampler",
+            parameters: {},
           },
-        ],
-        volume: 0.8,
-        pan: 0,
-        muted: false,
-        solo: false,
-        instrument: {
-          type: "sampler",
-          parameters: {},
-        },
-      };
-    }),
+        };
+      },
+    ),
   );
 
   const duration = tracks.reduce((maxDuration, track) => {
@@ -693,7 +935,7 @@ export const importAafFile = async (file: File): Promise<Project> => {
     importMetadata: {
       sourceFormat: "aaf",
       importedAt: Date.now(),
-      summary: `${tracks.length} audio track${tracks.length === 1 ? "" : "s"} imported from AAF`,
+      summary: `${tracks.length} audio track${tracks.length === 1 ? "" : "s"} imported from AAF${decodedEntries.length === 0 && companionDecodedEntries.length > 0 ? " with external media" : detectedAudioEntries.length === 0 ? " via fallback probing" : ""}`,
       aafRates: toDebugRateInfo(rateCandidates),
       aafHints: debugHints,
     },
