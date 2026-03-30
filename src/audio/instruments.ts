@@ -11,6 +11,7 @@ export interface InstrumentDefinition {
   type: InstrumentType;
   zones?: SampleZone[];
   pitchTracking?: boolean;
+  oneShot?: boolean;
 }
 
 export const INSTRUMENTS: Record<string, InstrumentDefinition> = {
@@ -30,6 +31,20 @@ export const INSTRUMENTS: Record<string, InstrumentDefinition> = {
       { pitch: 60, url: "/samples/piano-c4.mp3" },
       { pitch: 72, url: "/samples/piano-c5.mp3" },
       { pitch: 84, url: "/samples/piano-c6.mp3" },
+    ],
+  },
+  "drum-kit": {
+    id: "drum-kit",
+    name: "Drum Kit",
+    type: "sampler",
+    pitchTracking: false,
+    oneShot: true,
+    zones: [
+      { pitch: 36, url: "/samples/drums/kick-c2.mp3" },
+      { pitch: 38, url: "/samples/drums/snare-d2.mp3" },
+      { pitch: 41, url: "/samples/drums/hat-f2.mp3" },
+      { pitch: 42, url: "/samples/drums/hat-f2.mp3" },
+      { pitch: 46, url: "/samples/drums/hat-f2.mp3" },
     ],
   },
 };

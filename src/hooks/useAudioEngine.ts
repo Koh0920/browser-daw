@@ -8,10 +8,15 @@ import { useTransport } from "./useTransport";
 
 const LOOK_AHEAD_SECONDS = 0.2;
 const MIN_NOTE_DURATION_SECONDS = 0.05;
+const SAMPLER_RELEASE_SECONDS = 1.35;
 // WorkerのTick間隔より少し長めにとることで、余裕を持ってスケジュールします
 
 const midiNoteToFrequency = (note: number) =>
   440 * Math.pow(2, (note - 69) / 12);
+const getNormalizedVelocity = (velocity: number) => {
+  const normalized = Math.min(1, Math.max(0.08, velocity / 127));
+  return Math.pow(normalized, 0.72);
+};
 const instrumentCache = new Map<string, AudioBuffer>();
 const instrumentLoadCache = new Map<string, Promise<AudioBuffer | null>>();
 
@@ -451,7 +456,7 @@ export const useAudioEngine = () => {
                 startAt + MIN_NOTE_DURATION_SECONDS,
                 startAt + note.duration,
               );
-              const velocity = note.velocity / 127;
+              const velocity = getNormalizedVelocity(note.velocity);
               const instrumentDefinition = getInstrumentDefinition(
                 track.instrument.patchId,
               );
@@ -474,6 +479,15 @@ export const useAudioEngine = () => {
               if (selectedZone && samplerBuffer) {
                 const source = context.createBufferSource();
                 const noteGain = context.createGain();
+                const releaseSeconds = instrumentDefinition.oneShot
+                  ? Math.min(0.45, samplerBuffer.duration)
+                  : SAMPLER_RELEASE_SECONDS;
+                const samplerStopAt = instrumentDefinition.oneShot
+                  ? startAt + Math.min(samplerBuffer.duration, 2)
+                  : stopAt + releaseSeconds;
+                const holdUntil = instrumentDefinition.oneShot
+                  ? Math.min(startAt + 0.03, samplerStopAt)
+                  : Math.max(startAt + 0.012, stopAt - 0.18);
 
                 source.buffer = samplerBuffer;
                 source.playbackRate.value =
@@ -484,19 +498,35 @@ export const useAudioEngine = () => {
                 noteGain.gain.setValueAtTime(0, startAt);
                 noteGain.gain.linearRampToValueAtTime(
                   velocity,
-                  startAt + 0.005,
+                  startAt + (instrumentDefinition.oneShot ? 0.002 : 0.004),
                 );
-                noteGain.gain.setValueAtTime(
-                  velocity,
-                  Math.max(startAt + 0.005, stopAt - 0.1),
-                );
-                noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt + 1.5);
+
+                if (instrumentDefinition.oneShot) {
+                  noteGain.gain.exponentialRampToValueAtTime(
+                    Math.max(0.12, velocity * 0.55),
+                    holdUntil,
+                  );
+                  noteGain.gain.exponentialRampToValueAtTime(
+                    0.001,
+                    samplerStopAt,
+                  );
+                } else {
+                  noteGain.gain.setValueAtTime(velocity, holdUntil);
+                  noteGain.gain.exponentialRampToValueAtTime(
+                    Math.max(0.05, velocity * 0.55),
+                    stopAt + releaseSeconds * 0.28,
+                  );
+                  noteGain.gain.exponentialRampToValueAtTime(
+                    0.001,
+                    samplerStopAt,
+                  );
+                }
 
                 source.connect(noteGain);
                 noteGain.connect(trackChain.gain);
 
                 source.start(startAt);
-                source.stop(stopAt + 1.5);
+                source.stop(samplerStopAt);
 
                 activeNodesRef.current.add(source);
                 scheduledNotesRef.current.add(scheduleKey);
