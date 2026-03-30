@@ -1,18 +1,49 @@
 import { useEffect, useMemo, useRef } from "react";
+import { AUDIO_CONTEXT_UNLOCK_EVENT } from "@/audio/audioContextEvents";
 import {
   findNearestSampleZone,
   getInstrumentDefinition,
 } from "@/audio/instruments";
 import { useProjectStore } from "@/stores/projectStore";
+import { readAudioAsset } from "@/utils/audioStorage";
+import type { MidiClip } from "@/types";
 import { useTransport } from "./useTransport";
 
 const LOOK_AHEAD_SECONDS = 0.2;
 const MIN_NOTE_DURATION_SECONDS = 0.05;
 const SAMPLER_RELEASE_SECONDS = 1.35;
+const AUDIO_DEBUG_PREFIX = "[AudioEngine]";
 // WorkerのTick間隔より少し長めにとることで、余裕を持ってスケジュールします
+
+const logAudioDebug = (label: string, payload?: unknown) => {
+  void label;
+  void payload;
+  // if (payload === undefined) {
+  //   console.log(AUDIO_DEBUG_PREFIX, label);
+  //   return;
+  // }
+  //
+  // console.log(AUDIO_DEBUG_PREFIX, label, payload);
+};
 
 const midiNoteToFrequency = (note: number) =>
   440 * Math.pow(2, (note - 69) / 12);
+const ensureAudioContextRunning = async (context: AudioContext) => {
+  if (context.state === "running") {
+    return true;
+  }
+
+  try {
+    await context.resume();
+  } catch (error) {
+    console.error("AudioContext resume failed", error);
+    return false;
+  }
+
+  const nextState = context.state as AudioContextState;
+  return nextState === "running";
+};
+
 const getNormalizedVelocity = (velocity: number) => {
   const normalized = Math.min(1, Math.max(0.08, velocity / 127));
   return Math.pow(normalized, 0.72);
@@ -72,8 +103,16 @@ interface TrackNodeChain {
 export const useAudioEngine = () => {
   const currentProject = useProjectStore((state) => state.currentProject);
   // ★ isLooping, loopStart, loopEnd を追加で取得します
-  const { currentTime, isPlaying, revision, isLooping, loopStart, loopEnd } =
-    useTransport();
+  const {
+    currentTime,
+    isMasterMuted,
+    isPlaying,
+    isLooping,
+    loopEnd,
+    loopStart,
+    masterVolume,
+    revision,
+  } = useTransport();
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
@@ -84,8 +123,12 @@ export const useAudioEngine = () => {
   const decodedAudioBufferCacheRef = useRef<
     WeakMap<ArrayBuffer, Promise<AudioBuffer | null>>
   >(new WeakMap());
+  const decodedAudioAssetCacheRef = useRef<
+    Map<string, Promise<AudioBuffer | null>>
+  >(new Map());
   const playbackSessionRef = useRef(0);
   const workerRef = useRef<Worker | null>(null);
+  const wasPlayingRef = useRef(false);
 
   // ★ 追加: 再生・シークした瞬間の「Audioの時計」と「シーケンスの時計」を記録するRef
   const lastSyncTimeRef = useRef({ audioTime: 0, sequenceTime: 0 });
@@ -114,6 +157,38 @@ export const useAudioEngine = () => {
     return decodePromise;
   };
 
+  const getDecodedClipAudioBuffer = (context: AudioContext, clip: MidiClip) => {
+    if (clip.audioData) {
+      return getDecodedAudioBuffer(context, clip.audioData);
+    }
+
+    if (!clip.audioAssetPath) {
+      return Promise.resolve(null);
+    }
+
+    const cached = decodedAudioAssetCacheRef.current.get(clip.audioAssetPath);
+    if (cached) {
+      return cached;
+    }
+
+    const decodePromise = readAudioAsset(clip.audioAssetPath)
+      .then((audioData) => {
+        if (!audioData) {
+          return null;
+        }
+
+        return context.decodeAudioData(audioData.slice(0));
+      })
+      .catch((error) => {
+        console.error("Failed to decode stored audio clip", error);
+        decodedAudioAssetCacheRef.current.delete(clip.audioAssetPath!);
+        return null;
+      });
+
+    decodedAudioAssetCacheRef.current.set(clip.audioAssetPath, decodePromise);
+    return decodePromise;
+  };
+
   const trackMixerState = useMemo(() => {
     if (!currentProject) return new Map();
     const hasSolo = currentProject.tracks.some((t) => t.solo);
@@ -134,6 +209,10 @@ export const useAudioEngine = () => {
     masterGain.gain.value = 0.7;
     masterGain.connect(context.destination);
 
+    logAudioDebug("init", {
+      audioContextState: context.state,
+    });
+
     audioContextRef.current = context;
     masterGainRef.current = masterGain;
 
@@ -143,15 +222,46 @@ export const useAudioEngine = () => {
     );
     workerRef.current = worker;
 
-    const unlockAudioContext = () => {
-      if (context.state === "suspended") {
-        void context.resume();
-      }
+    const unlockEvents: Array<keyof DocumentEventMap> = [
+      "pointerdown",
+      "mousedown",
+      "touchstart",
+      "keydown",
+      "click",
+    ];
+
+    const removeUnlockListeners = () => {
+      unlockEvents.forEach((eventName) => {
+        document.removeEventListener(eventName, unlockAudioContext);
+      });
     };
-    document.addEventListener("click", unlockAudioContext, { once: true });
+
+    const unlockAudioContext = () => {
+      void ensureAudioContextRunning(context).then((didResume) => {
+        if (didResume) {
+          removeUnlockListeners();
+        }
+      });
+    };
+
+    const handleExplicitUnlockRequest = () => {
+      unlockAudioContext();
+    };
+
+    unlockEvents.forEach((eventName) => {
+      document.addEventListener(eventName, unlockAudioContext);
+    });
+    window.addEventListener(
+      AUDIO_CONTEXT_UNLOCK_EVENT,
+      handleExplicitUnlockRequest,
+    );
 
     return () => {
-      document.removeEventListener("click", unlockAudioContext);
+      removeUnlockListeners();
+      window.removeEventListener(
+        AUDIO_CONTEXT_UNLOCK_EVENT,
+        handleExplicitUnlockRequest,
+      );
       worker.terminate();
 
       activeNodesRef.current.forEach((node) => {
@@ -172,6 +282,19 @@ export const useAudioEngine = () => {
       void context.close();
     };
   }, []);
+
+  useEffect(() => {
+    const context = audioContextRef.current;
+    const masterGain = masterGainRef.current;
+    if (!context || !masterGain) {
+      return;
+    }
+
+    const targetGain = isMasterMuted ? 0 : masterVolume;
+    masterGain.gain.cancelScheduledValues(context.currentTime);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, context.currentTime);
+    masterGain.gain.setTargetAtTime(targetGain, context.currentTime, 0.015);
+  }, [isMasterMuted, masterVolume]);
 
   // Track Nodes (GainNodes) の同期
   useEffect(() => {
@@ -240,8 +363,8 @@ export const useAudioEngine = () => {
       if (track.type !== "audio") return;
 
       track.clips.forEach((clip) => {
-        if (clip.audioData) {
-          void getDecodedAudioBuffer(context, clip.audioData);
+        if (clip.audioData || clip.audioAssetPath) {
+          void getDecodedClipAudioBuffer(context, clip);
         }
       });
     });
@@ -277,6 +400,8 @@ export const useAudioEngine = () => {
     if (!worker || !context) return;
 
     const playbackSession = ++playbackSessionRef.current;
+    let isCancelled = false;
+    let removeMessageListener: (() => void) | null = null;
 
     if (!isPlaying) {
       worker.postMessage({ command: "stop" });
@@ -291,12 +416,6 @@ export const useAudioEngine = () => {
       return;
     }
 
-    if (context.state === "suspended") {
-      void context.resume();
-    }
-
-    worker.postMessage({ command: "start" });
-
     const handleTick = () => {
       if (!currentProject || !isPlaying) return;
 
@@ -309,6 +428,19 @@ export const useAudioEngine = () => {
       const scheduleUntilWindow = absoluteCurrentTime + LOOK_AHEAD_SECONDS;
       const loopLength = loopEnd - loopStart;
 
+      logAudioDebug("tick", {
+        audioContextState: context.state,
+        audioTime: Number(now.toFixed(4)),
+        currentTime: Number(currentTime.toFixed(4)),
+        isPlaying,
+        loopEnd,
+        loopStart,
+        projectDuration: currentProject.duration,
+        revision,
+        scheduledNotes: scheduledNotesRef.current.size,
+        sequenceTime: Number(absoluteCurrentTime.toFixed(4)),
+      });
+
       currentProject.tracks.forEach((track) => {
         const trackChain = trackNodesRef.current.get(track.id);
         if (!trackChain) return;
@@ -319,7 +451,7 @@ export const useAudioEngine = () => {
               monotonicStartTime: number,
               iteration: number,
             ) => {
-              if (!clip.audioData) return;
+              if (!clip.audioData && !clip.audioAssetPath) return;
 
               const scheduleKey = `${track.id}:${clip.id}:audio:${revision}:${iteration}`;
               if (
@@ -331,9 +463,9 @@ export const useAudioEngine = () => {
               pendingSchedulesRef.current.add(scheduleKey);
 
               try {
-                const audioBuffer = await getDecodedAudioBuffer(
+                const audioBuffer = await getDecodedClipAudioBuffer(
                   context,
-                  clip.audioData,
+                  clip,
                 );
                 if (
                   !audioBuffer ||
@@ -435,13 +567,14 @@ export const useAudioEngine = () => {
 
           clip.notes.forEach((note) => {
             const absoluteStartTime = clip.startTime + note.startTime;
+            const absoluteEndTime = absoluteStartTime + note.duration;
 
             const scheduleInstance = (
               monotonicStartTime: number,
               iteration: number,
             ) => {
               if (
-                monotonicStartTime < absoluteCurrentTime ||
+                absoluteEndTime <= absoluteCurrentTime ||
                 monotonicStartTime > scheduleUntilWindow
               )
                 return;
@@ -449,12 +582,25 @@ export const useAudioEngine = () => {
               const scheduleKey = `${track.id}:${clip.id}:${note.id}:${revision}:${iteration}`;
               if (scheduledNotesRef.current.has(scheduleKey)) return;
 
+              const playbackOffset = Math.max(
+                0,
+                absoluteCurrentTime - monotonicStartTime,
+              );
+              const remainingDuration = Math.max(
+                MIN_NOTE_DURATION_SECONDS,
+                note.duration - playbackOffset,
+              );
+              const adjustedStartTime = Math.max(
+                monotonicStartTime,
+                absoluteCurrentTime,
+              );
+
               const startAt =
                 lastSyncTimeRef.current.audioTime +
-                (monotonicStartTime - lastSyncTimeRef.current.sequenceTime);
+                (adjustedStartTime - lastSyncTimeRef.current.sequenceTime);
               const stopAt = Math.max(
                 startAt + MIN_NOTE_DURATION_SECONDS,
-                startAt + note.duration,
+                startAt + remainingDuration,
               );
               const velocity = getNormalizedVelocity(note.velocity);
               const instrumentDefinition = getInstrumentDefinition(
@@ -482,6 +628,12 @@ export const useAudioEngine = () => {
                 const releaseSeconds = instrumentDefinition.oneShot
                   ? Math.min(0.45, samplerBuffer.duration)
                   : SAMPLER_RELEASE_SECONDS;
+                const sourceOffset = instrumentDefinition.oneShot
+                  ? 0
+                  : Math.min(
+                      playbackOffset,
+                      Math.max(0, samplerBuffer.duration - 0.01),
+                    );
                 const samplerStopAt = instrumentDefinition.oneShot
                   ? startAt + Math.min(samplerBuffer.duration, 2)
                   : stopAt + releaseSeconds;
@@ -525,11 +677,21 @@ export const useAudioEngine = () => {
                 source.connect(noteGain);
                 noteGain.connect(trackChain.gain);
 
-                source.start(startAt);
+                source.start(startAt, sourceOffset);
                 source.stop(samplerStopAt);
 
                 activeNodesRef.current.add(source);
                 scheduledNotesRef.current.add(scheduleKey);
+
+                logAudioDebug("scheduled-sampler-note", {
+                  adjustedStartTime: Number(adjustedStartTime.toFixed(4)),
+                  noteId: note.id,
+                  offset: Number(sourceOffset.toFixed(4)),
+                  pitch: note.pitch,
+                  remainingDuration: Number(remainingDuration.toFixed(4)),
+                  scheduleKey,
+                  trackId: track.id,
+                });
 
                 source.onended = () => {
                   activeNodesRef.current.delete(source);
@@ -561,6 +723,15 @@ export const useAudioEngine = () => {
 
               activeNodesRef.current.add(osc);
               scheduledNotesRef.current.add(scheduleKey);
+
+              logAudioDebug("scheduled-osc-note", {
+                adjustedStartTime: Number(adjustedStartTime.toFixed(4)),
+                noteId: note.id,
+                pitch: note.pitch,
+                remainingDuration: Number(remainingDuration.toFixed(4)),
+                scheduleKey,
+                trackId: track.id,
+              });
 
               osc.onended = () => {
                 activeNodesRef.current.delete(osc);
@@ -605,28 +776,70 @@ export const useAudioEngine = () => {
       if (e.data.type === "tick") handleTick();
     };
 
-    worker.addEventListener("message", onMessage);
-    handleTick();
+    const startPlayback = async () => {
+      const didResume = await ensureAudioContextRunning(context);
+      if (
+        !didResume ||
+        isCancelled ||
+        playbackSession !== playbackSessionRef.current
+      ) {
+        logAudioDebug("start-playback-aborted", {
+          audioContextState: context.state,
+          didResume,
+          isCancelled,
+          playbackSession,
+          sessionRef: playbackSessionRef.current,
+        });
+        return;
+      }
+
+      logAudioDebug("start-playback", {
+        audioContextState: context.state,
+        currentTime: Number(currentTime.toFixed(4)),
+        isPlaying,
+        projectId: currentProject?.id,
+        revision,
+        trackCount: currentProject?.tracks.length ?? 0,
+      });
+
+      worker.postMessage({ command: "start" });
+      worker.addEventListener("message", onMessage);
+      removeMessageListener = () => {
+        worker.removeEventListener("message", onMessage);
+      };
+      handleTick();
+    };
+
+    void startPlayback();
 
     return () => {
-      worker.removeEventListener("message", onMessage);
+      isCancelled = true;
+      if (removeMessageListener) {
+        removeMessageListener();
+      }
     };
   }, [isPlaying, currentProject, revision, isLooping, loopStart, loopEnd]);
 
   // シーク時（revision変更時）のクリーンアップ
   useEffect(() => {
-    if (isPlaying) {
-      playbackSessionRef.current += 1;
-      activeNodesRef.current.forEach((node) => {
-        try {
-          node.stop();
-        } catch (e) {}
-      });
-      activeNodesRef.current.clear();
-      scheduledNotesRef.current.clear();
-      pendingSchedulesRef.current.clear();
+    if (!isPlaying || !wasPlayingRef.current) {
+      return;
     }
+
+    playbackSessionRef.current += 1;
+    activeNodesRef.current.forEach((node) => {
+      try {
+        node.stop();
+      } catch (e) {}
+    });
+    activeNodesRef.current.clear();
+    scheduledNotesRef.current.clear();
+    pendingSchedulesRef.current.clear();
   }, [revision]);
+
+  useEffect(() => {
+    wasPlayingRef.current = isPlaying;
+  }, [isPlaying, revision]);
 
   return { audioContext: audioContextRef.current };
 };

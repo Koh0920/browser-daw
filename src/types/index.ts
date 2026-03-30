@@ -112,5 +112,7 @@ export interface TransportState {
   isLoopEnabled: boolean;
   loopStart: number;
   loopEnd: number;
+  masterVolume: number;
+  isMasterMuted: boolean;
   revision: number;
 }
