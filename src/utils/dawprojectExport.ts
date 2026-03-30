@@ -52,11 +52,11 @@ const buildProjectXml = (
             const assetPath = audioAssetLookup.get(clip.id) ?? "";
 
             return [
-              `      <audioClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}" offset="${clip.audioOffset ?? 0}" sourceDuration="${clip.sourceDuration ?? clip.duration}">`,
+              `        <AudioClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}" offset="${clip.audioOffset ?? 0}" sourceDuration="${clip.sourceDuration ?? clip.duration}">`,
               assetPath
-                ? `        <source path="${escapeXml(assetPath)}" />`
+                ? `          <Source path="${escapeXml(assetPath)}" />`
                 : "",
-              "      </audioClip>",
+              "        </AudioClip>",
             ]
               .filter(Boolean)
               .join("\n");
@@ -64,14 +64,14 @@ const buildProjectXml = (
 
           const notesXml = clip.notes
             .map((note) => {
-              return `        <note id="${escapeXml(note.id)}" pitch="${note.pitch}" start="${note.startTime}" duration="${note.duration}" velocity="${note.velocity}" />`;
+              return `          <Note id="${escapeXml(note.id)}" pitch="${note.pitch}" start="${note.startTime}" duration="${note.duration}" velocity="${note.velocity}" />`;
             })
             .join("\n");
 
           return [
-            `      <midiClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}">`,
+            `        <MidiClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}">`,
             notesXml,
-            "      </midiClip>",
+            "        </MidiClip>",
           ]
             .filter(Boolean)
             .join("\n");
@@ -79,10 +79,13 @@ const buildProjectXml = (
         .join("\n");
 
       return [
-        `    <track id="${escapeXml(track.id)}" name="${escapeXml(track.name)}" type="${track.type}" volume="${track.volume}" pan="${track.pan}" muted="${track.muted}" solo="${track.solo}">`,
-        `      <instrument type="${escapeXml(track.instrument.type)}" patchId="${escapeXml(track.instrument.patchId ?? "")}" />`,
+        `    <Track id="${escapeXml(track.id)}" name="${escapeXml(track.name)}" contentType="${track.type}">`,
+        `      <Channel volume="${track.volume}" pan="${track.pan}" muted="${track.muted}" solo="${track.solo}" />`,
+        `      <Device type="${escapeXml(track.instrument.type)}" patchId="${escapeXml(track.instrument.patchId ?? "")}" />`,
+        "      <Clips>",
         clipsXml,
-        "    </track>",
+        "      </Clips>",
+        "    </Track>",
       ]
         .filter(Boolean)
         .join("\n");
@@ -91,12 +94,20 @@ const buildProjectXml = (
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<browserDawProject name="${escapeXml(project.name)}" format="dawproject-prototype" version="1">`,
-    `  <transport bpm="${project.bpm}" duration="${project.duration}" createdAt="${project.createdAt}" lastModified="${project.lastModified}" />`,
-    "  <tracks>",
+    `<Project version="1.0" application="BrowserDAW" name="${escapeXml(project.name)}">`,
+    "  <MetaData>",
+    `    <Title>${escapeXml(project.name)}</Title>`,
+    "    <Artist>Browser DAW</Artist>",
+    "  </MetaData>",
+    "  <Transport>",
+    `    <Tempo value="${project.bpm}" />`,
+    `    <Duration value="${project.duration}" />`,
+    "  </Transport>",
+    "  <Structure>",
     tracksXml,
-    "  </tracks>",
-    "</browserDawProject>",
+    "  </Structure>",
+    `  <BrowserDawMeta createdAt="${project.createdAt}" lastModified="${project.lastModified}" />`,
+    "</Project>",
   ].join("\n");
 };
 
@@ -114,7 +125,6 @@ const buildProjectManifest = (
         clips: track.clips.map((clip) => ({
           ...clip,
           audioData: undefined,
-          waveformData: undefined,
           archiveAssetPath: audioAssetLookup.get(clip.id),
         })),
       })),
