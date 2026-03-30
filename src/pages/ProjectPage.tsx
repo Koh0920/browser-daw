@@ -5,6 +5,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import AudioEditor from "@/components/editor/AudioEditor";
 import { ArrangementView } from "@/components/editor/ArrangementView";
 import MidiPianoRoll from "@/components/editor/MidiPianoRoll";
+import { INSTRUMENTS, getInstrumentDefinition } from "@/audio/instruments";
 import {
   Dialog,
   DialogContent,
@@ -577,29 +578,28 @@ const ProjectPage = () => {
                               }
                               onChange={(event) => {
                                 const value = event.target.value;
+                                const instrumentDefinition =
+                                  getInstrumentDefinition(value);
                                 useProjectStore
                                   .getState()
                                   .updateTrack(selectedTrack.id, {
                                     instrument: {
-                                      type:
-                                        value === "piano"
-                                          ? "sampler"
-                                          : "oscillator",
+                                      type: instrumentDefinition.type,
                                       patchId: value,
                                       parameters: {},
                                     },
                                   });
                               }}
                             >
-                              <option
-                                value="basic-synth"
-                                className="bg-slate-900"
-                              >
-                                Basic Synth
-                              </option>
-                              <option value="piano" className="bg-slate-900">
-                                Piano
-                              </option>
+                              {Object.values(INSTRUMENTS).map((instrument) => (
+                                <option
+                                  key={instrument.id}
+                                  value={instrument.id}
+                                  className="bg-slate-900"
+                                >
+                                  {instrument.name}
+                                </option>
+                              ))}
                             </select>
                           ) : (
                             selectedTrack.instrument.patchId ||

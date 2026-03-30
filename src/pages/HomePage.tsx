@@ -8,6 +8,7 @@ import { useProjectStore } from "@/stores/projectStore";
 const HomePage = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const aafFolderInputRef = useRef<HTMLInputElement | null>(null);
   const { createProject, loadProject } = useProjectStore();
   const { deleteProject, getProjectList, saveProject } = useProjectDatabase();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -48,25 +49,43 @@ const HomePage = () => {
     );
   };
 
-  const handleImportDawProject = async (
+  const handleImportProjectFiles = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const file = event.target.files?.[0];
-    if (!file) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) {
       return;
     }
 
     setIsImporting(true);
     setErrorMessage(null);
 
-    const lowerFileName = file.name.toLowerCase();
+    const primaryFile =
+      files.find((candidate) => /\.aaf$/i.test(candidate.name)) ??
+      files.find((candidate) => /\.(?:dawproject|zip)$/i.test(candidate.name));
+
+    if (!primaryFile) {
+      setIsImporting(false);
+      setErrorMessage(
+        "Select a .dawproject archive or an .aaf file. For Logic Pro AAF, you can also select the entire export folder.",
+      );
+      event.target.value = "";
+      return;
+    }
+
+    const lowerFileName = primaryFile.name.toLowerCase();
+    const companionFiles = files.filter(
+      (candidate) => candidate !== primaryFile,
+    );
 
     try {
       const importedProject = lowerFileName.endsWith(".aaf")
-        ? await (await import("@/utils/aafImport")).importAafFile(file)
+        ? await (
+            await import("@/utils/aafImport")
+          ).importAafFile(primaryFile, companionFiles)
         : await (
             await import("@/utils/dawprojectImport")
-          ).importDawProjectArchive(file);
+          ).importDawProjectArchive(primaryFile);
       loadProject(importedProject);
 
       const isSaved = await saveProject(importedProject);
@@ -77,10 +96,12 @@ const HomePage = () => {
       navigate(`/project/${importedProject.id}`);
     } catch (error) {
       console.error(error);
+      const message = error instanceof Error ? error.message : null;
       setErrorMessage(
-        lowerFileName.endsWith(".aaf")
-          ? "AAF import failed."
-          : ".dawproject import failed.",
+        message ||
+          (lowerFileName.endsWith(".aaf")
+            ? "AAF import failed."
+            : ".dawproject import failed."),
       );
     } finally {
       setIsImporting(false);
@@ -119,14 +140,35 @@ const HomePage = () => {
             disabled={isImporting}
           >
             <FileUp className="mr-2 h-4 w-4" />
-            Import .dawproject / .aaf
+            Import Files
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-cyan-400 hover:text-cyan-200 disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => aafFolderInputRef.current?.click()}
+            disabled={isImporting}
+          >
+            <Folder className="mr-2 h-4 w-4" />
+            Import AAF Folder
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".dawproject,.zip,.aaf,application/zip,application/octet-stream"
+            accept=".dawproject,.zip,.aaf,audio/*,application/zip,application/octet-stream"
+            multiple
             className="hidden"
-            onChange={handleImportDawProject}
+            onChange={handleImportProjectFiles}
+          />
+          <input
+            ref={aafFolderInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleImportProjectFiles}
+            {...({
+              webkitdirectory: "",
+              directory: "",
+            } as React.InputHTMLAttributes<HTMLInputElement>)}
           />
         </div>
 
@@ -217,7 +259,14 @@ const HomePage = () => {
                 className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950 px-6 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:border-cyan-500/50 hover:text-cyan-400"
                 disabled={isImporting}
               >
-                Import .dawproject / .aaf
+                Import Files
+              </button>
+              <button
+                onClick={() => aafFolderInputRef.current?.click()}
+                className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950 px-6 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:border-cyan-500/50 hover:text-cyan-400"
+                disabled={isImporting}
+              >
+                Import AAF Folder
               </button>
             </div>
           </div>

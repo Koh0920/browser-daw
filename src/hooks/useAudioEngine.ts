@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
+import {
+  findNearestSampleZone,
+  getInstrumentDefinition,
+} from "@/audio/instruments";
 import { useProjectStore } from "@/stores/projectStore";
 import { useTransport } from "./useTransport";
 
@@ -243,8 +247,20 @@ export const useAudioEngine = () => {
     if (!context || !currentProject) return;
 
     currentProject.tracks.forEach((track) => {
-      if (track.type === "midi" && track.instrument.patchId === "piano") {
-        void loadInstrumentSample(context, "/samples/piano-c4.mp3");
+      if (track.type !== "midi") {
+        return;
+      }
+
+      const instrumentDefinition = getInstrumentDefinition(
+        track.instrument.patchId,
+      );
+      if (
+        instrumentDefinition.type === "sampler" &&
+        instrumentDefinition.zones?.length
+      ) {
+        instrumentDefinition.zones.forEach((zone) => {
+          void loadInstrumentSample(context, zone.url);
+        });
       }
     });
   }, [currentProject]);
@@ -436,19 +452,34 @@ export const useAudioEngine = () => {
                 startAt + note.duration,
               );
               const velocity = note.velocity / 127;
-              const instrument = track.instrument;
-              const isPiano =
-                instrument.type === "sampler" && instrument.patchId === "piano";
-              const pianoBuffer = isPiano
-                ? instrumentCache.get("/samples/piano-c4.mp3")
+              const instrumentDefinition = getInstrumentDefinition(
+                track.instrument.patchId,
+              );
+              const selectedZone =
+                instrumentDefinition.type === "sampler" &&
+                instrumentDefinition.zones?.length
+                  ? findNearestSampleZone(
+                      note.pitch,
+                      instrumentDefinition.zones,
+                    )
+                  : null;
+              const samplerBuffer = selectedZone
+                ? instrumentCache.get(selectedZone.url)
                 : null;
 
-              if (isPiano && pianoBuffer) {
+              if (selectedZone && !samplerBuffer) {
+                void loadInstrumentSample(context, selectedZone.url);
+              }
+
+              if (selectedZone && samplerBuffer) {
                 const source = context.createBufferSource();
                 const noteGain = context.createGain();
 
-                source.buffer = pianoBuffer;
-                source.playbackRate.value = Math.pow(2, (note.pitch - 60) / 12);
+                source.buffer = samplerBuffer;
+                source.playbackRate.value =
+                  instrumentDefinition.pitchTracking === false
+                    ? 1
+                    : Math.pow(2, (note.pitch - selectedZone.pitch) / 12);
 
                 noteGain.gain.setValueAtTime(0, startAt);
                 noteGain.gain.linearRampToValueAtTime(
