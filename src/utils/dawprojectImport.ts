@@ -1,5 +1,5 @@
-import { strFromU8, unzipSync } from "fflate";
 import type { MidiClip, MidiNote, Project, ProjectTrack } from "@/types";
+import { analyzeAudioData } from "@/utils/audioAnalysis";
 
 type DawprojectArchive = Record<string, Uint8Array>;
 
@@ -79,6 +79,49 @@ const normalizeProject = (
         };
       }),
     })),
+  };
+};
+
+const hydrateImportedProjectWaveforms = async (project: Project) => {
+  const tracks = await Promise.all(
+    project.tracks.map(async (track) => {
+      if (track.type !== "audio") {
+        return track;
+      }
+
+      const clips = await Promise.all(
+        track.clips.map(async (clip) => {
+          if (!clip.audioData) {
+            return clip;
+          }
+
+          const analysis = await analyzeAudioData(clip.audioData);
+          return {
+            ...clip,
+            duration: clip.duration > 0 ? clip.duration : analysis.duration,
+            sourceDuration: clip.sourceDuration ?? analysis.duration,
+            waveformData: analysis.waveformData,
+          };
+        }),
+      );
+
+      return {
+        ...track,
+        clips,
+      };
+    }),
+  );
+
+  return {
+    ...project,
+    tracks,
+    duration: Math.max(
+      project.duration,
+      ...tracks.flatMap((track) =>
+        track.clips.map((clip) => clip.startTime + clip.duration),
+      ),
+      0,
+    ),
   };
 };
 
@@ -247,6 +290,7 @@ const parseXmlProject = (
 };
 
 export const importDawProjectArchive = async (file: File): Promise<Project> => {
+  const { strFromU8, unzipSync } = await import("fflate");
   const arrayBuffer = await file.arrayBuffer();
   const archive = unzipSync(new Uint8Array(arrayBuffer));
   const metadataEntry = getArchiveEntry(archive, "metadata.json");
@@ -254,7 +298,8 @@ export const importDawProjectArchive = async (file: File): Promise<Project> => {
 
   if (metadataEntry) {
     try {
-      return parseMetadataProject(strFromU8(metadataEntry), archive);
+      const project = parseMetadataProject(strFromU8(metadataEntry), archive);
+      return hydrateImportedProjectWaveforms(project);
     } catch (error) {
       console.warn(
         "Falling back to XML import after metadata parse failure",
@@ -267,5 +312,6 @@ export const importDawProjectArchive = async (file: File): Promise<Project> => {
     throw new Error("Archive did not contain metadata.json or project.xml");
   }
 
-  return parseXmlProject(strFromU8(projectXmlEntry), archive);
+  const project = parseXmlProject(strFromU8(projectXmlEntry), archive);
+  return hydrateImportedProjectWaveforms(project);
 };

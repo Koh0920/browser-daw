@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { MidiClip, MidiNote, Project, ProjectTrack } from "@/types";
+import { analyzeAudioData } from "@/utils/audioAnalysis";
 import { parseMidiFile } from "@/utils/midiImport";
 import { writeAudioAsset } from "@/utils/audioStorage";
 
@@ -55,40 +56,6 @@ const createAudioTrack = (trackCount: number, name?: string): ProjectTrack => ({
   },
 });
 
-const readChannelPeaks = (channelData: Float32Array, sampleCount: number) => {
-  const blockSize = Math.max(1, Math.floor(channelData.length / sampleCount));
-  const waveform = new Array<number>(sampleCount).fill(0);
-
-  for (let i = 0; i < sampleCount; i++) {
-    const start = i * blockSize;
-    const end = Math.min(channelData.length, start + blockSize);
-    let peak = 0;
-
-    for (let index = start; index < end; index++) {
-      peak = Math.max(peak, Math.abs(channelData[index]));
-    }
-
-    waveform[i] = peak;
-  }
-
-  return waveform;
-};
-
-const analyzeAudioData = async (audioData: ArrayBuffer) => {
-  const context = new OfflineAudioContext(1, 1, 44100);
-
-  try {
-    const decoded = await context.decodeAudioData(audioData.slice(0));
-    return {
-      duration: decoded.duration,
-      waveformData: readChannelPeaks(decoded.getChannelData(0), 512),
-    };
-  } catch (error) {
-    console.error("Audio decoding failed during analysis", error);
-    throw error;
-  }
-};
-
 const clampAudioClipDuration = (clip: MidiClip) => {
   const sourceOffset = clip.audioOffset ?? 0;
   const sourceDuration = clip.sourceDuration ?? clip.duration;
@@ -102,12 +69,14 @@ interface ProjectState {
   currentProject: Project | null;
   currentProjectId: string | null;
   selectedTrackId: string | null;
+  selectedClipId: string | null;
   isProjectModified: boolean;
   createProject: (name: string) => Project;
   loadProject: (project: Project) => void;
   clearProject: () => void;
   markSaved: () => void;
   selectTrack: (trackId: string | null) => void;
+  selectClip: (clipId: string | null) => void;
   addMidiTrack: (name?: string) => void;
   addAudioTrack: (name?: string) => string | null;
   addAudioClip: (
@@ -143,6 +112,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   currentProject: null,
   currentProjectId: null,
   selectedTrackId: null,
+  selectedClipId: null,
   isProjectModified: false,
 
   createProject: (name) => {
@@ -160,6 +130,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       currentProject: project,
       currentProjectId: project.id,
       selectedTrackId: null,
+      selectedClipId: null,
       isProjectModified: true,
     });
 
@@ -171,6 +142,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       currentProject: project,
       currentProjectId: project.id,
       selectedTrackId: project.tracks[0]?.id ?? null,
+      selectedClipId: null,
       isProjectModified: false,
     });
   },
@@ -180,6 +152,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       currentProject: null,
       currentProjectId: null,
       selectedTrackId: null,
+      selectedClipId: null,
       isProjectModified: false,
     });
   },
@@ -189,7 +162,11 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   selectTrack: (trackId) => {
-    set({ selectedTrackId: trackId });
+    set({ selectedTrackId: trackId, selectedClipId: null });
+  },
+
+  selectClip: (clipId) => {
+    set({ selectedClipId: clipId });
   },
 
   addMidiTrack: (name) => {
@@ -210,6 +187,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           tracks: [...state.currentProject.tracks, track],
         }),
         selectedTrackId: track.id,
+        selectedClipId: track.clips[0]?.id ?? null,
         isProjectModified: true,
       };
     });
@@ -232,6 +210,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           tracks: [...state.currentProject.tracks, track],
         }),
         selectedTrackId: track.id,
+        selectedClipId: null,
         isProjectModified: true,
       };
     });
@@ -298,6 +277,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           tracks,
         }),
         selectedTrackId: trackId,
+        selectedClipId: clipId,
         isProjectModified: true,
       };
     });
@@ -471,6 +451,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           tracks,
         }),
         selectedTrackId: tracks[0]?.id ?? null,
+        selectedClipId: null,
         isProjectModified: true,
       };
     });
@@ -492,6 +473,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           tracks: [...state.currentProject.tracks, ...imported.tracks],
         }),
         selectedTrackId: imported.tracks[0]?.id ?? state.selectedTrackId,
+        selectedClipId: imported.tracks[0]?.clips[0]?.id ?? null,
         isProjectModified: true,
       };
     });

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback } from "react";
-import { zipSync } from "fflate";
 import { useToast } from "@/components/ui/use-toast";
 import type { MidiClip, MidiNote, Project, ProjectTrack } from "@/types";
 
@@ -321,6 +320,7 @@ export const useAudioExport = () => {
           }),
         );
 
+        const { zipSync } = await import("fflate");
         const zipData = zipSync(archiveEntries, { level: 6 });
         const suffix = options.useLoopRange
           ? `_loop_${range.start.toFixed(2)}-${range.end.toFixed(2)}`
