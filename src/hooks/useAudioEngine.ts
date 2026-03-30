@@ -22,7 +22,7 @@ const logAudioDebug = (label: string, payload?: unknown) => {
   //   console.log(AUDIO_DEBUG_PREFIX, label);
   //   return;
   // }
-  //
+
   // console.log(AUDIO_DEBUG_PREFIX, label, payload);
 };
 
@@ -102,7 +102,6 @@ interface TrackNodeChain {
 
 export const useAudioEngine = () => {
   const currentProject = useProjectStore((state) => state.currentProject);
-  // ★ isLooping, loopStart, loopEnd を追加で取得します
   const {
     currentTime,
     isMasterMuted,

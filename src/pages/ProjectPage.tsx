@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, FileUp, Plus, Save } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Slider } from "@/components/ui/slider";
 import AudioEditor from "@/components/editor/AudioEditor";
 import { ArrangementView } from "@/components/editor/ArrangementView";
 import MidiPianoRoll from "@/components/editor/MidiPianoRoll";
@@ -24,6 +25,18 @@ import { useProjectStore } from "@/stores/projectStore";
 import type { AafImportDebugHint } from "@/types";
 
 type ExportTarget = "master" | "stems" | "dawproject";
+
+const formatPanLabel = (pan: number) => {
+  if (pan > 0) {
+    return `R ${Math.round(pan * 100)}`;
+  }
+
+  if (pan < 0) {
+    return `L ${Math.round(Math.abs(pan) * 100)}`;
+  }
+
+  return "C";
+};
 
 const ProjectPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -462,41 +475,60 @@ const ProjectPage = () => {
                                   </svg>
                                 </button>
                               </div>
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  className={`flex h-5 w-5 items-center justify-center rounded border text-[9px] font-bold transition-all ${track.muted ? "border-red-500/30 bg-red-500/20 text-red-400" : "border-slate-700/50 bg-slate-900 text-slate-500 hover:text-slate-300"}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    useProjectStore
-                                      .getState()
-                                      .updateTrack(track.id, {
-                                        muted: !track.muted,
-                                      });
-                                  }}
-                                  title="Mute"
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    className={`flex h-5 w-5 items-center justify-center rounded border text-[9px] font-bold transition-all ${track.muted ? "border-red-500/30 bg-red-500/20 text-red-400" : "border-slate-700/50 bg-slate-900 text-slate-500 hover:text-slate-300"}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      useProjectStore
+                                        .getState()
+                                        .updateTrack(track.id, {
+                                          muted: !track.muted,
+                                        });
+                                    }}
+                                    title="Mute"
+                                  >
+                                    M
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`flex h-5 w-5 items-center justify-center rounded border text-[9px] font-bold transition-all ${track.solo ? "border-yellow-500/30 bg-yellow-500/20 text-yellow-400" : "border-slate-700/50 bg-slate-900 text-slate-500 hover:text-slate-300"}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      useProjectStore
+                                        .getState()
+                                        .updateTrack(track.id, {
+                                          solo: !track.solo,
+                                        });
+                                    }}
+                                    title="Solo"
+                                  >
+                                    S
+                                  </button>
+                                </div>
+
+                                <div
+                                  className="w-16"
+                                  onClick={(event) => event.stopPropagation()}
                                 >
-                                  M
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`flex h-5 w-5 items-center justify-center rounded border text-[9px] font-bold transition-all ${track.solo ? "border-yellow-500/30 bg-yellow-500/20 text-yellow-400" : "border-slate-700/50 bg-slate-900 text-slate-500 hover:text-slate-300"}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    useProjectStore
-                                      .getState()
-                                      .updateTrack(track.id, {
-                                        solo: !track.solo,
-                                      });
-                                  }}
-                                  title="Solo"
-                                >
-                                  S
-                                </button>
-                                <span className="ml-2 truncate text-[10px] font-medium text-slate-500">
-                                  {track.instrument.patchId ||
-                                    track.instrument.type}
-                                </span>
+                                  <Slider
+                                    value={[track.volume]}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    onValueChange={(value) => {
+                                      useProjectStore
+                                        .getState()
+                                        .updateTrack(track.id, {
+                                          volume: value[0] ?? track.volume,
+                                        });
+                                    }}
+                                    aria-label={`${track.name} volume`}
+                                    className="w-full"
+                                  />
+                                </div>
                               </div>
                             </div>
                           );
@@ -607,17 +639,51 @@ const ProjectPage = () => {
                           )}
                         </dd>
                       </div>
-                      <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                        <dt className="text-xs text-slate-500">Volume</dt>
-                        <dd className="text-xs font-semibold text-cyan-100">
-                          {Math.round(selectedTrack.volume * 100)}%
-                        </dd>
+                      <div className="group flex flex-col gap-3 rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-3 transition-colors hover:bg-slate-800/40">
+                        <div className="flex items-center justify-between">
+                          <dt className="text-xs text-slate-500">Volume</dt>
+                          <dd className="text-xs font-semibold text-cyan-100">
+                            {Math.round(selectedTrack.volume * 100)}%
+                          </dd>
+                        </div>
+                        <Slider
+                          value={[selectedTrack.volume]}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          onValueChange={(value) => {
+                            useProjectStore
+                              .getState()
+                              .updateTrack(selectedTrack.id, {
+                                volume: value[0] ?? selectedTrack.volume,
+                              });
+                          }}
+                          aria-label={`${selectedTrack.name} volume`}
+                          className="w-full"
+                        />
                       </div>
-                      <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                        <dt className="text-xs text-slate-500">Pan</dt>
-                        <dd className="text-xs font-semibold text-slate-200">
-                          {selectedTrack.pan}
-                        </dd>
+                      <div className="group flex flex-col gap-3 rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-3 transition-colors hover:bg-slate-800/40">
+                        <div className="flex items-center justify-between">
+                          <dt className="text-xs text-slate-500">Pan</dt>
+                          <dd className="text-xs font-semibold text-slate-200">
+                            {formatPanLabel(selectedTrack.pan)}
+                          </dd>
+                        </div>
+                        <Slider
+                          value={[selectedTrack.pan]}
+                          min={-1}
+                          max={1}
+                          step={0.01}
+                          onValueChange={(value) => {
+                            useProjectStore
+                              .getState()
+                              .updateTrack(selectedTrack.id, {
+                                pan: value[0] ?? selectedTrack.pan,
+                              });
+                          }}
+                          aria-label={`${selectedTrack.name} pan`}
+                          className="w-full"
+                        />
                       </div>
                     </dl>
                   </div>
