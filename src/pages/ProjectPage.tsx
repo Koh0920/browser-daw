@@ -4,10 +4,25 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import AudioEditor from "@/components/editor/AudioEditor";
 import MidiPianoRoll from "@/components/editor/MidiPianoRoll";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import TransportBar from "@/components/transport/TransportBar";
 import { useAudioEngine } from "@/hooks/useAudioEngine";
+import { useAudioExport } from "@/hooks/useAudioExport";
 import { useProjectDatabase } from "@/hooks/useProjectDatabase";
+import { useTransport } from "@/hooks/useTransport";
 import { useProjectStore } from "@/stores/projectStore";
+import { createDawProjectArchive } from "@/utils/dawprojectExport";
+import { zipSync } from "fflate";
+
+type ExportTarget = "master" | "stems" | "dawproject";
 
 const ProjectPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +31,11 @@ const ProjectPage = () => {
   const audioFileInputRef = useRef<HTMLInputElement | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [exportTarget, setExportTarget] = useState<ExportTarget>("master");
+  const [useLoopRangeForExport, setUseLoopRangeForExport] = useState(false);
+  const [exportLoopStart, setExportLoopStart] = useState(0);
+  const [exportLoopEnd, setExportLoopEnd] = useState(8);
   const {
     addAudioClip,
     addAudioTrack,
@@ -30,7 +50,15 @@ const ProjectPage = () => {
     selectedTrackId,
   } = useProjectStore();
   const { getProject, saveProject } = useProjectDatabase();
+  const { exportProjectToStems, exportProjectToWav } = useAudioExport();
+  const { isLoopEnabled, loopEnd, loopStart } = useTransport();
   useAudioEngine();
+
+  useEffect(() => {
+    setExportLoopStart(loopStart);
+    setExportLoopEnd(loopEnd);
+    setUseLoopRangeForExport(isLoopEnabled);
+  }, [isLoopEnabled, loopEnd, loopStart]);
 
   useEffect(() => {
     if (!id) {
@@ -150,6 +178,59 @@ const ProjectPage = () => {
     }
   };
 
+  const handleExport = async () => {
+    if (!currentProject) {
+      return;
+    }
+
+    setIsBusy(true);
+    setStatusMessage(`Exporting ${currentProject.name}...`);
+
+    try {
+      let didExport = false;
+
+      if (exportTarget === "master") {
+        didExport = await exportProjectToWav(currentProject, {
+          useLoopRange: useLoopRangeForExport,
+          loopStart: exportLoopStart,
+          loopEnd: exportLoopEnd,
+        });
+      } else if (exportTarget === "stems") {
+        didExport = await exportProjectToStems(currentProject, {
+          useLoopRange: useLoopRangeForExport,
+          loopStart: exportLoopStart,
+          loopEnd: exportLoopEnd,
+        });
+      } else {
+        const { archiveEntries, fileName } =
+          createDawProjectArchive(currentProject);
+        const zipData = zipSync(archiveEntries, { level: 6 });
+        const zipBlob = new Blob([zipData], { type: "application/zip" });
+        const url = URL.createObjectURL(zipBlob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+        }, 100);
+        didExport = true;
+      }
+
+      setStatusMessage(
+        didExport ? `${currentProject.name} exported.` : "Export failed.",
+      );
+      if (didExport) {
+        setIsExportDialogOpen(false);
+      }
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("Export failed.");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   if (!currentProject) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-100">
@@ -225,6 +306,14 @@ const ProjectPage = () => {
           >
             <FileUp className="mr-1.5 h-3.5 w-3.5" />
             Import Audio
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-8 items-center rounded-md border border-slate-700/60 bg-slate-800/50 px-3 text-xs font-medium text-slate-300 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-300 active:scale-95"
+            onClick={() => setIsExportDialogOpen(true)}
+          >
+            <Save className="mr-1.5 h-3.5 w-3.5" />
+            Export
           </button>
           <div className="mx-2 h-4 w-px bg-slate-700" />
           <button
@@ -453,6 +542,142 @@ const ProjectPage = () => {
       <div className="shrink-0 border-t border-slate-800 bg-[#0F1423] shadow-[0_-10px_40px_rgba(0,0,0,0.3)] z-20">
         <TransportBar duration={currentProject.duration} />
       </div>
+
+      <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+        <DialogContent className="border-slate-800 bg-slate-950 text-slate-100 sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Export Project</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Render a master mix, package stems, or bundle the project as a
+              prototype .dawproject archive.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="grid gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Format
+              </p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {[
+                  {
+                    id: "master",
+                    label: "Master WAV",
+                    description: "Single stereo mixdown",
+                  },
+                  {
+                    id: "stems",
+                    label: "Stems ZIP",
+                    description: "One WAV per audible track",
+                  },
+                  {
+                    id: "dawproject",
+                    label: ".dawproject",
+                    description: "XML + bundled source assets",
+                  },
+                ].map((option) => {
+                  const isSelected = exportTarget === option.id;
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`rounded-lg border px-3 py-3 text-left transition-all ${isSelected ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-100" : "border-slate-800 bg-slate-900/50 text-slate-300 hover:border-slate-700 hover:bg-slate-900"}`}
+                      onClick={() => setExportTarget(option.id as ExportTarget)}
+                    >
+                      <div className="text-xs font-semibold">
+                        {option.label}
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-400">
+                        {option.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div
+              className={`rounded-lg border px-4 py-3 ${exportTarget === "dawproject" ? "border-slate-800/60 bg-slate-900/30 opacity-60" : "border-slate-800 bg-slate-900/50"}`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-slate-200">
+                    Use Loop Range
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Restrict master or stem rendering to the current transport
+                    loop points.
+                  </p>
+                </div>
+                <Switch
+                  checked={useLoopRangeForExport}
+                  onCheckedChange={setUseLoopRangeForExport}
+                  disabled={exportTarget === "dawproject"}
+                />
+              </div>
+
+              {useLoopRangeForExport && exportTarget !== "dawproject" && (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1 text-xs text-slate-400">
+                    Loop In
+                    <input
+                      type="number"
+                      min={0}
+                      max={currentProject.duration}
+                      step={0.25}
+                      value={exportLoopStart}
+                      onChange={(event) =>
+                        setExportLoopStart(Number(event.target.value))
+                      }
+                      className="h-9 rounded-md border border-slate-700/50 bg-[#0B0F19] px-3 font-mono text-sm text-slate-200 outline-none transition-colors focus:border-cyan-500/50"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-400">
+                    Loop Out
+                    <input
+                      type="number"
+                      min={0}
+                      max={currentProject.duration}
+                      step={0.25}
+                      value={exportLoopEnd}
+                      onChange={(event) =>
+                        setExportLoopEnd(Number(event.target.value))
+                      }
+                      className="h-9 rounded-md border border-slate-700/50 bg-[#0B0F19] px-3 font-mono text-sm text-slate-200 outline-none transition-colors focus:border-cyan-500/50"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {exportTarget === "dawproject" && (
+              <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-[11px] text-cyan-100/80">
+                This prototype archive bundles project.xml, metadata.json, and
+                raw audio assets for future DAWProject import/export work.
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-700 bg-transparent px-4 text-sm text-slate-300 transition hover:bg-slate-900"
+              onClick={() => setIsExportDialogOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-md bg-cyan-500/15 px-4 text-sm font-medium text-cyan-200 ring-1 ring-inset ring-cyan-500/30 transition hover:bg-cyan-500/25 disabled:pointer-events-none disabled:opacity-50"
+              onClick={() => void handleExport()}
+              disabled={isBusy}
+            >
+              Export Now
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

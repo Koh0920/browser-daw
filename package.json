@@ -46,6 +46,7 @@
     "date-fns": "4.1.0",
     "dexie": "latest",
     "embla-carousel-react": "8.5.1",
+    "fflate": "^0.8.2",
     "immer": "latest",
     "input-otp": "1.4.1",
     "jiti": "latest",
