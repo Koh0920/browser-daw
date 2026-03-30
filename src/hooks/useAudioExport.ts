@@ -1,12 +1,18 @@
 "use client";
 
 import { useCallback } from "react";
+import {
+  findNearestSampleZone,
+  getInstrumentDefinition,
+} from "@/audio/instruments";
 import { useToast } from "@/components/ui/use-toast";
 import type { MidiClip, MidiNote, Project, ProjectTrack } from "@/types";
 
 const DEFAULT_SAMPLE_RATE = 44100;
 const DEFAULT_CHANNELS = 2;
 const MIN_RENDER_DURATION_SECONDS = 0.05;
+const MIN_NOTE_DURATION_SECONDS = 0.05;
+const SAMPLER_RELEASE_SECONDS = 1.35;
 
 export interface ExportOptions {
   mode: "master" | "stems";
@@ -23,8 +29,43 @@ interface RenderRange {
   duration: number;
 }
 
+interface ExportRenderState {
+  instrumentBufferCache: Map<string, Promise<AudioBuffer | null>>;
+}
+
 const midiNoteToFrequency = (note: number) =>
   440 * Math.pow(2, (note - 69) / 12);
+
+const getNormalizedVelocity = (velocity: number) => {
+  const normalized = Math.min(1, Math.max(0.08, velocity / 127));
+  return Math.pow(normalized, 0.72);
+};
+
+const instrumentSampleDataCache = new Map<string, Promise<ArrayBuffer | null>>();
+
+const loadInstrumentSampleData = async (url: string) => {
+  const cachedBuffer = instrumentSampleDataCache.get(url);
+  if (cachedBuffer) {
+    return cachedBuffer;
+  }
+
+  const loadPromise = fetch(url)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sample ${url}: ${response.status}`);
+      }
+
+      return response.arrayBuffer();
+    })
+    .catch((error) => {
+      instrumentSampleDataCache.delete(url);
+      console.error(`Failed to load sample: ${url}`, error);
+      return null;
+    });
+
+  instrumentSampleDataCache.set(url, loadPromise);
+  return loadPromise;
+};
 
 const sanitizeFileName = (value: string) => {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-") || "export";
@@ -142,6 +183,60 @@ const createOfflineContext = (range: RenderRange) => {
   });
 };
 
+const getDecodedInstrumentSample = (
+  offlineCtx: OfflineAudioContext,
+  renderState: ExportRenderState,
+  url: string,
+) => {
+  const cachedBuffer = renderState.instrumentBufferCache.get(url);
+  if (cachedBuffer) {
+    return cachedBuffer;
+  }
+
+  const decodePromise = loadInstrumentSampleData(url)
+    .then((sampleData) => {
+      if (!sampleData) {
+        return null;
+      }
+
+      return offlineCtx.decodeAudioData(sampleData.slice(0));
+    })
+    .catch((error) => {
+      renderState.instrumentBufferCache.delete(url);
+      console.error(`Failed to decode sample: ${url}`, error);
+      return null;
+    });
+
+  renderState.instrumentBufferCache.set(url, decodePromise);
+  return decodePromise;
+};
+
+const preloadProjectInstrumentSamples = async (project: Project) => {
+  const sampleUrls = new Set<string>();
+
+  getTrackExportList(project).forEach((track) => {
+    if (track.type !== "midi") {
+      return;
+    }
+
+    const instrumentDefinition = getInstrumentDefinition(track.instrument.patchId);
+    if (
+      instrumentDefinition.type !== "sampler" ||
+      !instrumentDefinition.zones?.length
+    ) {
+      return;
+    }
+
+    instrumentDefinition.zones.forEach((zone) => {
+      sampleUrls.add(zone.url);
+    });
+  });
+
+  await Promise.all(
+    Array.from(sampleUrls, (url) => loadInstrumentSampleData(url)),
+  );
+};
+
 const scheduleAudioClip = async (
   offlineCtx: OfflineAudioContext,
   trackGain: GainNode,
@@ -181,12 +276,14 @@ const scheduleAudioClip = async (
   source.start(startAt, playbackOffset, audibleDuration);
 };
 
-const scheduleMidiNote = (
+const scheduleMidiNote = async (
   offlineCtx: OfflineAudioContext,
   trackGain: GainNode,
+  track: ProjectTrack,
   clip: MidiClip,
   note: MidiNote,
   range: RenderRange,
+  renderState: ExportRenderState,
 ) => {
   const noteStart = clip.startTime + note.startTime;
   const noteEnd = noteStart + note.duration;
@@ -199,20 +296,86 @@ const scheduleMidiNote = (
   }
 
   const startAt = audibleStart - range.start;
-  const stopAt = startAt + audibleDuration;
+  const playbackOffset = Math.max(0, audibleStart - noteStart);
+  const stopAt = startAt + Math.max(MIN_NOTE_DURATION_SECONDS, audibleDuration);
+  const velocity = getNormalizedVelocity(note.velocity);
+  const instrumentDefinition = getInstrumentDefinition(track.instrument.patchId);
+  const selectedZone =
+    instrumentDefinition.type === "sampler" && instrumentDefinition.zones?.length
+      ? findNearestSampleZone(note.pitch, instrumentDefinition.zones)
+      : null;
+
+  if (selectedZone) {
+    const samplerBuffer = await getDecodedInstrumentSample(
+      offlineCtx,
+      renderState,
+      selectedZone.url,
+    );
+
+    if (samplerBuffer) {
+      const source = offlineCtx.createBufferSource();
+      const noteGain = offlineCtx.createGain();
+      const releaseSeconds = instrumentDefinition.oneShot
+        ? Math.min(0.45, samplerBuffer.duration)
+        : SAMPLER_RELEASE_SECONDS;
+      const sourceOffset = instrumentDefinition.oneShot
+        ? 0
+        : Math.min(playbackOffset, Math.max(0, samplerBuffer.duration - 0.01));
+      const samplerStopAt = instrumentDefinition.oneShot
+        ? startAt + Math.min(samplerBuffer.duration, 2)
+        : stopAt + releaseSeconds;
+      const holdUntil = instrumentDefinition.oneShot
+        ? Math.min(startAt + 0.03, samplerStopAt)
+        : Math.max(startAt + 0.012, stopAt - 0.18);
+
+      source.buffer = samplerBuffer;
+      source.playbackRate.value =
+        instrumentDefinition.pitchTracking === false
+          ? 1
+          : Math.pow(2, (note.pitch - selectedZone.pitch) / 12);
+
+      noteGain.gain.setValueAtTime(0, startAt);
+      noteGain.gain.linearRampToValueAtTime(
+        velocity,
+        startAt + (instrumentDefinition.oneShot ? 0.002 : 0.004),
+      );
+
+      if (instrumentDefinition.oneShot) {
+        noteGain.gain.exponentialRampToValueAtTime(
+          Math.max(0.12, velocity * 0.55),
+          holdUntil,
+        );
+        noteGain.gain.exponentialRampToValueAtTime(0.001, samplerStopAt);
+      } else {
+        noteGain.gain.setValueAtTime(velocity, holdUntil);
+        noteGain.gain.exponentialRampToValueAtTime(
+          Math.max(0.05, velocity * 0.55),
+          stopAt + releaseSeconds * 0.28,
+        );
+        noteGain.gain.exponentialRampToValueAtTime(0.001, samplerStopAt);
+      }
+
+      source.connect(noteGain);
+      noteGain.connect(trackGain);
+      source.start(startAt, sourceOffset);
+      source.stop(samplerStopAt);
+      return;
+    }
+  }
+
   const oscillator = offlineCtx.createOscillator();
   const noteGain = offlineCtx.createGain();
-  const velocity = note.velocity / 127;
 
-  oscillator.type = "sine";
+  oscillator.type = "triangle";
   oscillator.frequency.value = midiNoteToFrequency(note.pitch);
 
-  noteGain.gain.setValueAtTime(velocity * 0.5, startAt);
+  noteGain.gain.setValueAtTime(0, startAt);
+  noteGain.gain.linearRampToValueAtTime(velocity, startAt + 0.01);
   noteGain.gain.setValueAtTime(
-    velocity * 0.5,
-    Math.max(startAt, stopAt - 0.01),
+    velocity,
+    Math.max(startAt + 0.01, stopAt - 0.05),
   );
-  noteGain.gain.linearRampToValueAtTime(0.0001, stopAt);
+  noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt);
 
   oscillator.connect(noteGain);
   noteGain.connect(trackGain);
@@ -225,6 +388,7 @@ const scheduleTrack = async (
   track: ProjectTrack,
   range: RenderRange,
   destination: AudioNode,
+  renderState: ExportRenderState,
 ) => {
   const trackGain = offlineCtx.createGain();
   const trackPanner = offlineCtx.createStereoPanner();
@@ -244,26 +408,41 @@ const scheduleTrack = async (
     return;
   }
 
-  track.clips.forEach((clip) => {
-    if (!clip.notes.length) {
-      return;
-    }
+  await Promise.all(
+    track.clips.map(async (clip) => {
+      if (!clip.notes.length) {
+        return;
+      }
 
-    clip.notes.forEach((note) => {
-      scheduleMidiNote(offlineCtx, trackGain, clip, note, range);
-    });
-  });
+      await Promise.all(
+        clip.notes.map((note) => {
+          return scheduleMidiNote(
+            offlineCtx,
+            trackGain,
+            track,
+            clip,
+            note,
+            range,
+            renderState,
+          );
+        }),
+      );
+    }),
+  );
 };
 
 const renderMasterBuffer = async (project: Project, range: RenderRange) => {
   const offlineCtx = createOfflineContext(range);
+  const renderState: ExportRenderState = {
+    instrumentBufferCache: new Map(),
+  };
   const masterGain = offlineCtx.createGain();
   masterGain.connect(offlineCtx.destination);
 
   const tracks = getTrackExportList(project);
   await Promise.all(
     tracks.map((track) => {
-      return scheduleTrack(offlineCtx, track, range, masterGain);
+      return scheduleTrack(offlineCtx, track, range, masterGain, renderState);
     }),
   );
 
@@ -276,7 +455,16 @@ const renderStemBuffers = async (project: Project, range: RenderRange) => {
   return Promise.all(
     tracks.map(async (track, index) => {
       const offlineCtx = createOfflineContext(range);
-      await scheduleTrack(offlineCtx, track, range, offlineCtx.destination);
+      const renderState: ExportRenderState = {
+        instrumentBufferCache: new Map(),
+      };
+      await scheduleTrack(
+        offlineCtx,
+        track,
+        range,
+        offlineCtx.destination,
+        renderState,
+      );
       const buffer = await offlineCtx.startRendering();
 
       return {
@@ -293,6 +481,7 @@ export const useAudioExport = () => {
   const exportProjectAudio = useCallback(
     async (project: Project, options: ExportOptions) => {
       try {
+        await preloadProjectInstrumentSamples(project);
         const range = getRenderRange(project, options);
 
         if (options.mode === "master") {
