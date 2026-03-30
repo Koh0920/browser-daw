@@ -16,10 +16,18 @@ interface AudioEditorProps {
 const AudioEditor = ({ track }: AudioEditorProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const autoScrollTargetRef = useRef<number | null>(null);
 
-  const { currentProject, moveAudioClip, splitAudioClip, trimAudioClip } =
-    useProjectStore();
-  const { currentTime, seekTo } = useTransport();
+  const {
+    currentProject,
+    moveAudioClip,
+    selectedClipId,
+    selectClip,
+    splitAudioClip,
+    trimAudioClip,
+  } = useProjectStore();
+  const { currentTime, isPlaying, seekTo } = useTransport();
 
   const [zoom, setZoom] = useState(100); // pixels per second
   const [selectedClip, setSelectedClip] = useState<AudioClip | null>(null);
@@ -37,11 +45,14 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
   // Find a clip to edit
   useEffect(() => {
     if (track.clips && track.clips.length > 0) {
-      setSelectedClip(track.clips[0]);
+      const nextClip =
+        track.clips.find((clip) => clip.id === selectedClipId) ??
+        track.clips[0];
+      setSelectedClip(nextClip);
     } else {
       setSelectedClip(null);
     }
-  }, [track.clips]);
+  }, [selectedClipId, track.clips]);
 
   // Draw audio waveform
   useEffect(() => {
@@ -75,15 +86,54 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
       });
     }
 
-    // Draw playhead
-    ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
-    ctx.lineWidth = 2;
+    // Draw playhead band and line
     const playheadX = currentTime * zoom;
+    ctx.fillStyle = "rgba(248, 113, 113, 0.12)";
+    ctx.fillRect(playheadX - 7, 0, 14, canvasHeight);
+    ctx.strokeStyle = "rgba(248, 113, 113, 0.9)";
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(playheadX, 0);
     ctx.lineTo(playheadX, canvasHeight);
     ctx.stroke();
   }, [track.clips, selectedClip, currentTime, duration, zoom]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) {
+      return;
+    }
+
+    if (!isPlaying) {
+      autoScrollTargetRef.current = null;
+      return;
+    }
+
+    const playheadX = currentTime * zoom;
+    const viewportStart = scrollElement.scrollLeft;
+    const viewportWidth = scrollElement.clientWidth;
+    const safeStart = viewportStart + viewportWidth * 0.18;
+    const safeEnd = viewportStart + viewportWidth * 0.78;
+
+    if (playheadX < safeStart || playheadX > safeEnd) {
+      const nextScrollLeft = Math.max(0, playheadX - viewportWidth * 0.38);
+
+      if (
+        autoScrollTargetRef.current === null ||
+        Math.abs(nextScrollLeft - autoScrollTargetRef.current) > 24
+      ) {
+        autoScrollTargetRef.current = nextScrollLeft;
+      }
+
+      if (
+        Math.abs(scrollElement.scrollLeft - autoScrollTargetRef.current) > 1
+      ) {
+        scrollElement.scrollLeft = autoScrollTargetRef.current;
+      }
+    } else {
+      autoScrollTargetRef.current = null;
+    }
+  }, [currentTime, isPlaying, zoom]);
 
   const drawAudioClip = (
     ctx: CanvasRenderingContext2D,
@@ -165,6 +215,7 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
 
         if (clickTimePosition >= clipStart && clickTimePosition <= clipEnd) {
           setSelectedClip(clip);
+          selectClip(clip.id);
 
           // Check if clicking near the edges (for trimming)
           const clipStartX = clipStart * zoom;
@@ -185,6 +236,7 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
 
     // If not clicking on a clip, deselect
     setSelectedClip(null);
+    selectClip(null);
     setDragAction(null);
 
     // Set playhead position
@@ -271,16 +323,30 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
       </div>
 
       <div className="flex-1 overflow-auto">
-        <canvas
-          ref={canvasRef}
-          width={canvasWidth}
-          height={canvasHeight}
-          className="cursor-pointer"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        />
+        <div ref={scrollRef} className="relative h-full overflow-auto">
+          <div
+            className="relative"
+            style={{ width: canvasWidth, height: canvasHeight }}
+          >
+            <div
+              className="pointer-events-none absolute inset-y-0 z-10 -translate-x-1/2"
+              style={{ left: currentTime * zoom }}
+            >
+              <div className="absolute inset-y-0 left-1/2 w-4 -translate-x-1/2 bg-[linear-gradient(180deg,rgba(248,113,113,0.18),rgba(248,113,113,0.04))]" />
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.75)]" />
+            </div>
+            <canvas
+              ref={canvasRef}
+              width={canvasWidth}
+              height={canvasHeight}
+              className="relative z-0 cursor-pointer"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

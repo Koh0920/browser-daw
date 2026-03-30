@@ -3,6 +3,7 @@ import { ArrowLeft, FileUp, Plus, Save } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import AudioEditor from "@/components/editor/AudioEditor";
+import { ArrangementView } from "@/components/editor/ArrangementView";
 import MidiPianoRoll from "@/components/editor/MidiPianoRoll";
 import {
   Dialog,
@@ -19,8 +20,6 @@ import { useAudioExport } from "@/hooks/useAudioExport";
 import { useProjectDatabase } from "@/hooks/useProjectDatabase";
 import { useTransport } from "@/hooks/useTransport";
 import { useProjectStore } from "@/stores/projectStore";
-import { createDawProjectArchive } from "@/utils/dawprojectExport";
-import { zipSync } from "fflate";
 
 type ExportTarget = "master" | "stems" | "dawproject";
 
@@ -46,7 +45,9 @@ const ProjectPage = () => {
     loadProject,
     markSaved,
     removeTrack,
+    selectClip,
     selectTrack,
+    selectedClipId,
     selectedTrackId,
   } = useProjectStore();
   const { getProject, saveProject } = useProjectDatabase();
@@ -99,7 +100,10 @@ const ProjectPage = () => {
     );
   }, [currentProject, selectedTrackId]);
 
-  const selectedClip = selectedTrack?.clips[0] ?? null;
+  const selectedClip =
+    selectedTrack?.clips.find((clip) => clip.id === selectedClipId) ??
+    selectedTrack?.clips[0] ??
+    null;
 
   const handleSave = async () => {
     if (!currentProject) {
@@ -202,6 +206,9 @@ const ProjectPage = () => {
           loopEnd: exportLoopEnd,
         });
       } else {
+        const { createDawProjectArchive } =
+          await import("@/utils/dawprojectExport");
+        const { zipSync } = await import("fflate");
         const { archiveEntries, fileName } =
           createDawProjectArchive(currentProject);
         const zipData = zipSync(archiveEntries, { level: 6 });
@@ -345,124 +352,165 @@ const ProjectPage = () => {
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal">
           <Panel
-            defaultSize={20}
-            minSize={15}
-            maxSize={30}
-            className="flex flex-col border-r border-slate-800 bg-[#0B0F19]"
+            defaultSize={80}
+            minSize={50}
+            className="flex flex-col bg-[#0B0F19]"
           >
-            <div className="flex h-10 shrink-0 items-center justify-between border-b border-slate-800/50 px-4 bg-slate-900/30">
-              <h2 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Tracks
-              </h2>
-            </div>
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
-              {currentProject.tracks.length === 0 ? (
-                <div className="mx-2 mt-4 rounded-lg border border-dashed border-slate-800/60 p-4 text-center text-xs text-slate-500">
-                  <p>Add a track to start</p>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {currentProject.tracks.map((track, index) => {
-                    const isSelected = track.id === selectedTrack?.id;
-                    return (
-                      <div
-                        key={track.id}
-                        className={`group cursor-pointer w-full rounded-md border px-3 py-2.5 text-left transition-all ${isSelected ? "border-cyan-500/40 bg-cyan-500/15 shadow-[0_0_15px_rgba(34,211,238,0.05)]" : "border-transparent hover:bg-slate-800/60 hover:border-slate-700/50"}`}
-                        onClick={() => selectTrack(track.id)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <p
-                            className={`truncate text-sm font-semibold tracking-tight ${isSelected ? "text-cyan-50" : "text-slate-300 group-hover:text-slate-200"}`}
-                          >
-                            {track.name}
-                          </p>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-all ${track.muted ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-slate-800/50 text-slate-500 border border-slate-700/50 hover:text-slate-300"}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                useProjectStore
-                                  .getState()
-                                  .updateTrack(track.id, {
-                                    muted: !track.muted,
-                                  });
-                              }}
-                              title="Mute"
-                            >
-                              M
-                            </button>
-                            <button
-                              type="button"
-                              className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-all ${track.solo ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" : "bg-slate-800/50 text-slate-500 border border-slate-700/50 hover:text-slate-300"}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                useProjectStore
-                                  .getState()
-                                  .updateTrack(track.id, { solo: !track.solo });
-                              }}
-                              title="Solo"
-                            >
-                              S
-                            </button>
-                            <button
-                              type="button"
-                              className="shrink-0 p-1 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                removeTrack(track.id);
-                              }}
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M18 6 6 18" />
-                                <path d="m6 6 12 12" />
-                              </svg>
-                            </button>
-                          </div>
+            <PanelGroup direction="vertical">
+              <Panel
+                defaultSize={60}
+                minSize={20}
+                className="flex overflow-hidden"
+              >
+                <PanelGroup direction="horizontal">
+                  <Panel
+                    defaultSize={20}
+                    minSize={15}
+                    maxSize={30}
+                    className="flex flex-col border-r border-slate-800 bg-[#0F131A] z-10 shadow-lg"
+                  >
+                    <div className="flex h-8 shrink-0 items-center justify-between border-b border-slate-800/50 bg-slate-900/30 px-4">
+                      <h2 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Tracks
+                      </h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden">
+                      {currentProject.tracks.length === 0 ? (
+                        <div className="mx-3 mt-4 rounded-lg border border-dashed border-slate-800/60 p-4 text-center text-xs text-slate-500">
+                          <p>Add a track to start</p>
                         </div>
-                        <p
-                          className={`mt-0.5 truncate text-[10px] ${isSelected ? "text-cyan-200/60" : "text-slate-500"}`}
-                        >
-                          {track.instrument.patchId || track.instrument.type}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </Panel>
+                      ) : (
+                        currentProject.tracks.map((track) => {
+                          const isSelected = track.id === selectedTrack?.id;
 
-          <PanelResizeHandle className="group relative w-1 outline-none bg-slate-900 z-10">
-            <div className="absolute inset-y-0 -inset-x-1.5 cursor-col-resize transition-colors group-hover:bg-cyan-500/30 group-active:bg-cyan-500/50" />
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-1 rounded-full bg-slate-700 group-hover:bg-cyan-400 opacity-50 transition-colors" />
-          </PanelResizeHandle>
+                          return (
+                            <div
+                              key={track.id}
+                              className={`group flex h-[80px] w-full cursor-pointer flex-col justify-center border-b border-slate-800/80 px-3 py-2 text-left transition-all ${isSelected ? "border-l-2 border-l-cyan-400 bg-slate-800/50" : "hover:bg-slate-800/30"}`}
+                              onClick={() => {
+                                selectTrack(track.id);
+                                selectClip(null);
+                              }}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(event) => {
+                                if (
+                                  event.key === "Enter" ||
+                                  event.key === " "
+                                ) {
+                                  event.preventDefault();
+                                  selectTrack(track.id);
+                                  selectClip(null);
+                                }
+                              }}
+                            >
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <p
+                                  className={`truncate text-sm font-bold tracking-tight ${isSelected ? "text-cyan-50" : "text-slate-300"}`}
+                                >
+                                  {track.name}
+                                </p>
+                                <button
+                                  type="button"
+                                  className="shrink-0 p-1 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    removeTrack(track.id);
+                                  }}
+                                  aria-label={`Remove ${track.name}`}
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                  </svg>
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  className={`flex h-5 w-5 items-center justify-center rounded border text-[9px] font-bold transition-all ${track.muted ? "border-red-500/30 bg-red-500/20 text-red-400" : "border-slate-700/50 bg-slate-900 text-slate-500 hover:text-slate-300"}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    useProjectStore
+                                      .getState()
+                                      .updateTrack(track.id, {
+                                        muted: !track.muted,
+                                      });
+                                  }}
+                                  title="Mute"
+                                >
+                                  M
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`flex h-5 w-5 items-center justify-center rounded border text-[9px] font-bold transition-all ${track.solo ? "border-yellow-500/30 bg-yellow-500/20 text-yellow-400" : "border-slate-700/50 bg-slate-900 text-slate-500 hover:text-slate-300"}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    useProjectStore
+                                      .getState()
+                                      .updateTrack(track.id, {
+                                        solo: !track.solo,
+                                      });
+                                  }}
+                                  title="Solo"
+                                >
+                                  S
+                                </button>
+                                <span className="ml-2 truncate text-[10px] font-medium text-slate-500">
+                                  {track.instrument.patchId ||
+                                    track.instrument.type}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </Panel>
 
-          <Panel
-            defaultSize={60}
-            minSize={30}
-            className="flex flex-col bg-[#080B12]"
-          >
-            {selectedTrack?.type === "audio" ? (
-              <AudioEditor track={selectedTrack} />
-            ) : (
-              <MidiPianoRoll
-                track={selectedTrack}
-                clip={selectedClip}
-                duration={currentProject.duration}
-                bpm={currentProject.bpm}
-              />
-            )}
+                  <PanelResizeHandle className="w-1 cursor-col-resize bg-slate-800 transition-colors hover:bg-cyan-500/50" />
+
+                  <Panel defaultSize={80} className="relative bg-[#1A1D24]">
+                    <ArrangementView />
+                  </Panel>
+                </PanelGroup>
+              </Panel>
+
+              <PanelResizeHandle className="z-20 h-1 cursor-row-resize bg-slate-800 transition-colors hover:bg-cyan-500/50" />
+
+              <Panel
+                defaultSize={40}
+                minSize={20}
+                className="relative flex flex-col bg-[#080B12] shadow-[0_-5px_15px_rgba(0,0,0,0.3)]"
+              >
+                {selectedTrack ? (
+                  selectedTrack.type === "audio" ? (
+                    <AudioEditor track={selectedTrack} />
+                  ) : (
+                    <MidiPianoRoll
+                      track={selectedTrack}
+                      clip={selectedClip}
+                      duration={currentProject.duration}
+                      bpm={currentProject.bpm}
+                    />
+                  )
+                ) : (
+                  <div className="flex flex-1 items-center justify-center text-sm font-medium text-slate-600">
+                    Select a track or clip to edit
+                  </div>
+                )}
+              </Panel>
+            </PanelGroup>
           </Panel>
 
           <PanelResizeHandle className="group relative w-1 outline-none bg-slate-900 z-10">

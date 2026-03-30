@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { FileUp, Folder, Plus, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { ProjectSummary } from "@/types";
-import { importDawProjectArchive } from "@/utils/dawprojectImport";
 import { useProjectDatabase } from "@/hooks/useProjectDatabase";
 import { useProjectStore } from "@/stores/projectStore";
 
@@ -60,8 +59,14 @@ const HomePage = () => {
     setIsImporting(true);
     setErrorMessage(null);
 
+    const lowerFileName = file.name.toLowerCase();
+
     try {
-      const importedProject = await importDawProjectArchive(file);
+      const importedProject = lowerFileName.endsWith(".aaf")
+        ? await (await import("@/utils/aafImport")).importAafFile(file)
+        : await (
+            await import("@/utils/dawprojectImport")
+          ).importDawProjectArchive(file);
       loadProject(importedProject);
 
       const isSaved = await saveProject(importedProject);
@@ -72,7 +77,11 @@ const HomePage = () => {
       navigate(`/project/${importedProject.id}`);
     } catch (error) {
       console.error(error);
-      setErrorMessage(".dawproject import failed.");
+      setErrorMessage(
+        lowerFileName.endsWith(".aaf")
+          ? "AAF import failed."
+          : ".dawproject import failed.",
+      );
     } finally {
       setIsImporting(false);
       event.target.value = "";
@@ -110,12 +119,12 @@ const HomePage = () => {
             disabled={isImporting}
           >
             <FileUp className="mr-2 h-4 w-4" />
-            Import .dawproject
+            Import .dawproject / .aaf
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".dawproject,.zip,application/zip"
+            accept=".dawproject,.zip,.aaf,application/zip,application/octet-stream"
             className="hidden"
             onChange={handleImportDawProject}
           />
@@ -208,7 +217,7 @@ const HomePage = () => {
                 className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950 px-6 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:border-cyan-500/50 hover:text-cyan-400"
                 disabled={isImporting}
               >
-                Import .dawproject
+                Import .dawproject / .aaf
               </button>
             </div>
           </div>
