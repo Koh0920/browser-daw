@@ -8,6 +8,42 @@ const MIN_NOTE_DURATION_SECONDS = 0.05;
 
 const midiNoteToFrequency = (note: number) =>
   440 * Math.pow(2, (note - 69) / 12);
+const instrumentCache = new Map<string, AudioBuffer>();
+const instrumentLoadCache = new Map<string, Promise<AudioBuffer | null>>();
+
+const loadInstrumentSample = async (context: AudioContext, url: string) => {
+  const cachedBuffer = instrumentCache.get(url);
+  if (cachedBuffer) {
+    return cachedBuffer;
+  }
+
+  const pendingLoad = instrumentLoadCache.get(url);
+  if (pendingLoad) {
+    return pendingLoad;
+  }
+
+  const loadPromise = fetch(url)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sample ${url}: ${response.status}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await context.decodeAudioData(arrayBuffer);
+      instrumentCache.set(url, audioBuffer);
+      instrumentLoadCache.delete(url);
+      return audioBuffer;
+    })
+    .catch((error) => {
+      instrumentLoadCache.delete(url);
+      console.error(`Failed to load sample: ${url}`, error);
+      return null;
+    });
+
+  instrumentLoadCache.set(url, loadPromise);
+  return loadPromise;
+};
+
 const getAudioClipPlaybackDuration = (
   clipDuration: number,
   bufferDuration: number,
@@ -202,6 +238,17 @@ export const useAudioEngine = () => {
     });
   }, [currentProject]);
 
+  useEffect(() => {
+    const context = audioContextRef.current;
+    if (!context || !currentProject) return;
+
+    currentProject.tracks.forEach((track) => {
+      if (track.type === "midi" && track.instrument.patchId === "piano") {
+        void loadInstrumentSample(context, "/samples/piano-c4.mp3");
+      }
+    });
+  }, [currentProject]);
+
   // Playback State & Scheduling
   useEffect(() => {
     const worker = workerRef.current;
@@ -388,13 +435,55 @@ export const useAudioEngine = () => {
                 startAt + MIN_NOTE_DURATION_SECONDS,
                 startAt + note.duration,
               );
+              const velocity = note.velocity / 127;
+              const instrument = track.instrument;
+              const isPiano =
+                instrument.type === "sampler" && instrument.patchId === "piano";
+              const pianoBuffer = isPiano
+                ? instrumentCache.get("/samples/piano-c4.mp3")
+                : null;
+
+              if (isPiano && pianoBuffer) {
+                const source = context.createBufferSource();
+                const noteGain = context.createGain();
+
+                source.buffer = pianoBuffer;
+                source.playbackRate.value = Math.pow(2, (note.pitch - 60) / 12);
+
+                noteGain.gain.setValueAtTime(0, startAt);
+                noteGain.gain.linearRampToValueAtTime(
+                  velocity,
+                  startAt + 0.005,
+                );
+                noteGain.gain.setValueAtTime(
+                  velocity,
+                  Math.max(startAt + 0.005, stopAt - 0.1),
+                );
+                noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt + 1.5);
+
+                source.connect(noteGain);
+                noteGain.connect(trackChain.gain);
+
+                source.start(startAt);
+                source.stop(stopAt + 1.5);
+
+                activeNodesRef.current.add(source);
+                scheduledNotesRef.current.add(scheduleKey);
+
+                source.onended = () => {
+                  activeNodesRef.current.delete(source);
+                  source.disconnect();
+                  noteGain.disconnect();
+                };
+                return;
+              }
+
               const osc = context.createOscillator();
               const noteGain = context.createGain();
 
               osc.type = "triangle";
               osc.frequency.value = midiNoteToFrequency(note.pitch);
 
-              const velocity = note.velocity / 127;
               noteGain.gain.setValueAtTime(0, startAt);
               noteGain.gain.linearRampToValueAtTime(velocity, startAt + 0.01);
               noteGain.gain.setValueAtTime(

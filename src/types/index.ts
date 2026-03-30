@@ -48,6 +48,37 @@ export interface ProjectTrack {
 
 export type AudioTrack = ProjectTrack;
 
+export interface AafImportRateInfo {
+  entryPath: string;
+  kind: "edit-rate" | "sample-rate";
+  value: number;
+  label: string;
+}
+
+export interface AafImportDebugHint {
+  entryPath: string;
+  trackName?: string;
+  slotId?: number;
+  matchedAudioEntryName?: string;
+  matchedBy?: string;
+  startRawValue?: number;
+  startUnit?: string;
+  startTime?: number;
+  durationRawValue?: number;
+  durationUnit?: string;
+  duration?: number;
+  rate?: number;
+  rateKind?: "edit-rate" | "sample-rate";
+}
+
+export interface ProjectImportMetadata {
+  sourceFormat: "aaf" | "dawproject";
+  importedAt: number;
+  summary?: string;
+  aafRates?: AafImportRateInfo[];
+  aafHints?: AafImportDebugHint[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -56,6 +87,7 @@ export interface Project {
   tracks: ProjectTrack[];
   createdAt: number;
   lastModified: number;
+  importMetadata?: ProjectImportMetadata;
 }
 
 export interface ProjectSummary {
