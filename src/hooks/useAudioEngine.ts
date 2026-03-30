@@ -136,21 +136,11 @@ export const useAudioEngine = () => {
 
       const now = context.currentTime
       
-      // ★ 修正: UIの時計を使わず、AudioContextの経過時間から「超正確な現在位置」を計算
+      // 現在のAudio経過時間から、モノトニック（単調増加）なシーケンス時間を計算
       const elapsedAudioTime = now - lastSyncTimeRef.current.audioTime
-      let preciseCurrentPos = lastSyncTimeRef.current.sequenceTime + elapsedAudioTime
-
-      // ループ対応：正確な時間がループ終端を超えていたら、ループ周回数とオフセットを計算
-      let loopIteration = 0
-      let loopOffset = 0
-      if (isLooping && loopEnd > loopStart && preciseCurrentPos >= loopEnd) {
-        loopIteration = Math.floor((preciseCurrentPos - loopStart) / (loopEnd - loopStart))
-        loopOffset = loopIteration * (loopEnd - loopStart)
-        // 判定用の現在位置をループ範囲内に巻き戻す
-        preciseCurrentPos -= loopOffset
-      }
-
-      const scheduleUntil = preciseCurrentPos + LOOK_AHEAD_SECONDS
+      const absoluteCurrentTime = lastSyncTimeRef.current.sequenceTime + elapsedAudioTime
+      const scheduleUntilWindow = absoluteCurrentTime + LOOK_AHEAD_SECONDS
+      const loopLength = loopEnd - loopStart
 
       currentProject.tracks.forEach(track => {
         const trackGain = trackNodesRef.current.get(track.id)
@@ -160,52 +150,61 @@ export const useAudioEngine = () => {
           clip.notes.forEach(note => {
             const absoluteStartTime = clip.startTime + note.startTime
 
-            // ノートがループ範囲内にある場合、現在の周回に合わせた時間に補正
-            let adjustedStartTime = absoluteStartTime
-            if (isLooping && absoluteStartTime >= loopStart && absoluteStartTime < loopEnd) {
-              adjustedStartTime += loopOffset
+            // ノート発音のコアロジックを関数化
+            const scheduleInstance = (monotonicStartTime: number, iteration: number) => {
+              if (monotonicStartTime < absoluteCurrentTime || monotonicStartTime > scheduleUntilWindow) return
+
+              const scheduleKey = `${track.id}:${clip.id}:${note.id}:${revision}:${iteration}`
+              if (scheduledNotesRef.current.has(scheduleKey)) return
+
+              const startAt = lastSyncTimeRef.current.audioTime + (monotonicStartTime - lastSyncTimeRef.current.sequenceTime)
+              const stopAt = Math.max(startAt + 0.05, startAt + note.duration)
+
+              // --- 発音処理 ---
+              const osc = context.createOscillator()
+              const noteGain = context.createGain()
+              
+              osc.type = "triangle"
+              osc.frequency.value = midiNoteToFrequency(note.pitch)
+              
+              const velocity = note.velocity / 127
+              noteGain.gain.setValueAtTime(0, startAt)
+              noteGain.gain.linearRampToValueAtTime(velocity, startAt + 0.01)
+              noteGain.gain.setValueAtTime(velocity, Math.max(startAt + 0.01, stopAt - 0.05))
+              noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt)
+
+              osc.connect(noteGain)
+              noteGain.connect(trackGain)
+
+              osc.start(startAt)
+              osc.stop(stopAt)
+
+              activeNodesRef.current.add(osc)
+              scheduledNotesRef.current.add(scheduleKey)
+
+              osc.onended = () => {
+                activeNodesRef.current.delete(osc)
+                noteGain.disconnect()
+              }
             }
 
-            // 重複発音を防ぐキーに、ループ周回数(loopIteration)を含める
-            const scheduleKey = `${track.id}:${clip.id}:${note.id}:${revision}:${loopIteration}`
+            // ループ有効時のスケジュール展開
+            if (!isLooping || loopLength <= 0) {
+              scheduleInstance(absoluteStartTime, 0)
+            } else {
+              if (absoluteStartTime < loopStart) {
+                // ループ前のノートは最初の1回だけ鳴る
+                scheduleInstance(absoluteStartTime, 0)
+              } else if (absoluteStartTime >= loopStart && absoluteStartTime < loopEnd) {
+                // 先読み期間に入るすべての周回（イテレーション）を探す
+                const minIter = Math.max(0, Math.floor((absoluteCurrentTime - absoluteStartTime) / loopLength))
+                const maxIter = Math.max(0, Math.ceil((scheduleUntilWindow - absoluteStartTime) / loopLength))
 
-            if (
-              adjustedStartTime < preciseCurrentPos || 
-              adjustedStartTime > scheduleUntil || 
-              scheduledNotesRef.current.has(scheduleKey)
-            ) {
-              return
-            }
-
-            // ★ 究極の修正: スケジュール時刻を AudioContext 基準で計算（絶対に揺らがない）
-            const startAt = lastSyncTimeRef.current.audioTime + (adjustedStartTime - lastSyncTimeRef.current.sequenceTime)
-            const stopAt = Math.max(startAt + 0.05, startAt + note.duration)
-
-            // --- 発音処理 ---
-            const osc = context.createOscillator()
-            const noteGain = context.createGain()
-            
-            osc.type = "triangle"
-            osc.frequency.value = midiNoteToFrequency(note.pitch)
-            
-            const velocity = note.velocity / 127
-            noteGain.gain.setValueAtTime(0, startAt)
-            noteGain.gain.linearRampToValueAtTime(velocity, startAt + 0.01)
-            noteGain.gain.setValueAtTime(velocity, Math.max(startAt + 0.01, stopAt - 0.05))
-            noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt)
-
-            osc.connect(noteGain)
-            noteGain.connect(trackGain)
-
-            osc.start(startAt)
-            osc.stop(stopAt)
-
-            activeNodesRef.current.add(osc)
-            scheduledNotesRef.current.add(scheduleKey)
-
-            osc.onended = () => {
-              activeNodesRef.current.delete(osc)
-              noteGain.disconnect()
+                for (let i = minIter; i <= maxIter; i++) {
+                  scheduleInstance(absoluteStartTime + i * loopLength, i)
+                }
+              }
+              // absoluteStartTime >= loopEnd のノートはループ中には鳴らない
             }
           })
         })

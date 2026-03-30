@@ -28,3 +28,12 @@ yarn-error.log*
 
 # MacOS
 .DS_Store
+# Ato
+.ato/
+.tmp/
+artifacts/
+
+# Capsule
+.capsule/
+*.capsule
+*.sig
