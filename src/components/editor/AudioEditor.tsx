@@ -81,7 +81,7 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
     // Draw audio clips
     if (track.clips && track.clips.length > 0) {
       track.clips.forEach((clip) => {
-        const isSelected = selectedClip && selectedClip.id === clip.id;
+        const isSelected = selectedClip?.id === clip.id;
         drawAudioClip(ctx, clip, isSelected);
       });
     }

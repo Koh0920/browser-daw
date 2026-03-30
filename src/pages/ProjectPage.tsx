@@ -20,6 +20,7 @@ import { useAudioExport } from "@/hooks/useAudioExport";
 import { useProjectDatabase } from "@/hooks/useProjectDatabase";
 import { useTransport } from "@/hooks/useTransport";
 import { useProjectStore } from "@/stores/projectStore";
+import type { AafImportDebugHint } from "@/types";
 
 type ExportTarget = "master" | "stems" | "dawproject";
 
@@ -104,6 +105,31 @@ const ProjectPage = () => {
     selectedTrack?.clips.find((clip) => clip.id === selectedClipId) ??
     selectedTrack?.clips[0] ??
     null;
+
+  const aafImportMetadata =
+    currentProject?.importMetadata?.sourceFormat === "aaf"
+      ? currentProject.importMetadata
+      : null;
+
+  const selectedAafHint = useMemo<AafImportDebugHint | null>(() => {
+    if (!aafImportMetadata?.aafHints?.length || !selectedTrack) {
+      return null;
+    }
+
+    const audioFileName = selectedClip?.audioFileName;
+
+    return (
+      aafImportMetadata.aafHints.find(
+        (hint) =>
+          Boolean(audioFileName) &&
+          hint.matchedAudioEntryName === audioFileName,
+      ) ??
+      aafImportMetadata.aafHints.find(
+        (hint) => hint.trackName === selectedTrack.name,
+      ) ??
+      null
+    );
+  }, [aafImportMetadata, selectedClip?.audioFileName, selectedTrack]);
 
   const handleSave = async () => {
     if (!currentProject) {
@@ -542,8 +568,43 @@ const ProjectPage = () => {
                       <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
                         <dt className="text-xs text-slate-500">Instrument</dt>
                         <dd className="text-xs font-semibold text-slate-200">
-                          {selectedTrack.instrument.patchId ||
-                            selectedTrack.instrument.type}
+                          {selectedTrack.type === "midi" ? (
+                            <select
+                              className="cursor-pointer appearance-none bg-transparent text-right outline-none"
+                              value={
+                                selectedTrack.instrument.patchId ||
+                                "basic-synth"
+                              }
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                useProjectStore
+                                  .getState()
+                                  .updateTrack(selectedTrack.id, {
+                                    instrument: {
+                                      type:
+                                        value === "piano"
+                                          ? "sampler"
+                                          : "oscillator",
+                                      patchId: value,
+                                      parameters: {},
+                                    },
+                                  });
+                              }}
+                            >
+                              <option
+                                value="basic-synth"
+                                className="bg-slate-900"
+                              >
+                                Basic Synth
+                              </option>
+                              <option value="piano" className="bg-slate-900">
+                                Piano
+                              </option>
+                            </select>
+                          ) : (
+                            selectedTrack.instrument.patchId ||
+                            selectedTrack.instrument.type
+                          )}
                         </dd>
                       </div>
                       <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
@@ -576,6 +637,92 @@ const ProjectPage = () => {
                       </div>
                     </dl>
                   </div>
+
+                  {aafImportMetadata && (
+                    <div>
+                      <h3 className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <div className="h-px flex-1 bg-slate-800/60"></div>
+                        AAF Import
+                        <div className="h-px flex-1 bg-slate-800/60"></div>
+                      </h3>
+
+                      <div className="mb-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[11px] text-cyan-100/80">
+                        <p className="font-semibold text-cyan-100">
+                          {aafImportMetadata.summary ?? "Imported from AAF"}
+                        </p>
+                        <p className="mt-1 text-cyan-100/70">
+                          Rates: {aafImportMetadata.aafRates?.length ?? 0} •
+                          Hints: {aafImportMetadata.aafHints?.length ?? 0}
+                        </p>
+                      </div>
+
+                      {selectedAafHint ? (
+                        <dl className="space-y-2">
+                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                            <dt className="text-xs text-slate-500">Match</dt>
+                            <dd className="text-right text-[11px] font-semibold text-slate-200">
+                              {selectedAafHint.matchedBy ?? "heuristic"}
+                            </dd>
+                          </div>
+                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                            <dt className="text-xs text-slate-500">Entry</dt>
+                            <dd className="max-w-[60%] truncate text-right text-[11px] font-semibold text-slate-200">
+                              {selectedAafHint.entryPath}
+                            </dd>
+                          </div>
+                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                            <dt className="text-xs text-slate-500">Start</dt>
+                            <dd className="text-right text-[11px] font-semibold text-slate-200">
+                              {selectedAafHint.startTime?.toFixed(3) ?? "0.000"}
+                              s
+                              {selectedAafHint.startRawValue !== undefined && (
+                                <span className="ml-1 text-slate-500">
+                                  ({selectedAafHint.startRawValue}{" "}
+                                  {selectedAafHint.startUnit ?? "raw"})
+                                </span>
+                              )}
+                            </dd>
+                          </div>
+                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                            <dt className="text-xs text-slate-500">Duration</dt>
+                            <dd className="text-right text-[11px] font-semibold text-slate-200">
+                              {selectedAafHint.duration?.toFixed(3) ?? "-"}s
+                              {selectedAafHint.durationRawValue !==
+                                undefined && (
+                                <span className="ml-1 text-slate-500">
+                                  ({selectedAafHint.durationRawValue}{" "}
+                                  {selectedAafHint.durationUnit ?? "raw"})
+                                </span>
+                              )}
+                            </dd>
+                          </div>
+                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                            <dt className="text-xs text-slate-500">Rate</dt>
+                            <dd className="text-right text-[11px] font-semibold text-slate-200">
+                              {selectedAafHint.rate
+                                ? `${selectedAafHint.rate.toFixed(3)} ${selectedAafHint.rateKind ?? "rate"}`
+                                : "not detected"}
+                            </dd>
+                          </div>
+                          {selectedAafHint.slotId !== undefined && (
+                            <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                              <dt className="text-xs text-slate-500">
+                                Slot ID
+                              </dt>
+                              <dd className="text-right text-[11px] font-semibold text-slate-200">
+                                {selectedAafHint.slotId}
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-slate-800/60 px-3 py-3 text-xs text-slate-500">
+                          No track-specific AAF hint matched the current
+                          selection.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="mt-8 text-center text-xs text-slate-500">
