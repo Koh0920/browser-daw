@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { MidiClip, MidiNote, Project, ProjectTrack } from "@/types";
+import type {
+  MidiClip,
+  MidiNote,
+  Project,
+  ProjectTool,
+  ProjectTrack,
+} from "@/types";
+import { useTransportStore } from "@/stores/transportStore";
 import { analyzeAudioData } from "@/utils/audioAnalysis";
 import { parseMidiFile } from "@/utils/midiImport";
 import { writeAudioAsset } from "@/utils/audioStorage";
@@ -16,10 +23,19 @@ const TRACK_COLORS = [
 
 const pickTrackColor = (trackCount: number) =>
   TRACK_COLORS[trackCount % TRACK_COLORS.length];
+const MIN_CLIP_DURATION = 0.05;
 
 const touchProject = (project: Project): Project => ({
   ...project,
   lastModified: Date.now(),
+});
+
+const createMidiClip = (name: string, startTime: number): MidiClip => ({
+  id: createId(),
+  name,
+  startTime,
+  duration: 0.25,
+  notes: [],
 });
 
 const createMidiTrack = (
@@ -44,6 +60,7 @@ const createMidiTrack = (
   pan: 0,
   muted: false,
   solo: false,
+  recordArmed: false,
   instrument: {
     type: "oscillator",
     parameters: {
@@ -63,6 +80,7 @@ const createAudioTrack = (trackCount: number, name?: string): ProjectTrack => ({
   pan: 0,
   muted: false,
   solo: false,
+  recordArmed: false,
   instrument: {
     type: "sampler",
     parameters: {},
@@ -78,20 +96,67 @@ const clampAudioClipDuration = (clip: MidiClip) => {
   );
 };
 
+const clampMidiNotesToWindow = (
+  notes: MidiNote[],
+  windowStart: number,
+  windowEnd: number,
+  offset = 0,
+) =>
+  notes.flatMap((note) => {
+    const noteStart = note.startTime;
+    const noteEnd = note.startTime + note.duration;
+    const clippedStart = Math.max(windowStart, noteStart);
+    const clippedEnd = Math.min(windowEnd, noteEnd);
+
+    if (clippedEnd <= clippedStart) {
+      return [];
+    }
+
+    return [
+      {
+        ...note,
+        id: createId(),
+        startTime: Math.max(0, clippedStart - windowStart + offset),
+        duration: Math.max(0.05, clippedEnd - clippedStart),
+      },
+    ];
+  });
+
 interface ProjectState {
   currentProject: Project | null;
   currentProjectId: string | null;
   selectedTrackId: string | null;
   selectedClipId: string | null;
   isProjectModified: boolean;
+  activeTool: ProjectTool;
   createProject: (name: string) => Project;
   loadProject: (project: Project) => void;
   clearProject: () => void;
   markSaved: () => void;
+  updateProjectSettings: (
+    updates: Partial<
+      Pick<
+        Project,
+        "bpm" | "timeSignatureNumerator" | "timeSignatureDenominator"
+      >
+    >,
+  ) => void;
   selectTrack: (trackId: string | null) => void;
   selectClip: (clipId: string | null) => void;
+  setActiveTool: (tool: ProjectTool) => void;
   addMidiTrack: (name?: string) => void;
   addAudioTrack: (name?: string) => string | null;
+  toggleTrackRecordArm: (trackId: string) => void;
+  createRecordingMidiClip: (
+    trackId: string,
+    startTime: number,
+  ) => string | null;
+  appendNotesToClip: (
+    trackId: string,
+    clipId: string,
+    notes: MidiNote[],
+  ) => void;
+  removeClip: (trackId: string, clipId: string) => void;
   addAudioClip: (
     trackId: string,
     clip: {
@@ -118,6 +183,15 @@ interface ProjectState {
     clipId: string,
     notes: MidiNote[],
   ) => void;
+  moveClip: (trackId: string, clipId: string, startTime: number) => void;
+  trimClip: (
+    trackId: string,
+    clipId: string,
+    startTime: number,
+    duration: number,
+    trimMode: "start" | "end",
+  ) => void;
+  splitClip: (trackId: string, clipId: string, splitTime: number) => void;
   updateTrack: (trackId: string, updates: Partial<ProjectTrack>) => void;
 }
 
@@ -127,6 +201,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   selectedTrackId: null,
   selectedClipId: null,
   isProjectModified: false,
+  activeTool: "pointer",
 
   createProject: (name) => {
     const project: Project = {
@@ -160,6 +235,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       tracks: project.tracks.map((track, index) => ({
         ...track,
         trackColor: track.trackColor ?? pickTrackColor(index),
+        recordArmed: track.recordArmed ?? false,
       })),
     };
 
@@ -186,12 +262,32 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({ isProjectModified: false });
   },
 
+  updateProjectSettings: (updates) => {
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          ...updates,
+        }),
+        isProjectModified: true,
+      };
+    });
+  },
+
   selectTrack: (trackId) => {
     set({ selectedTrackId: trackId, selectedClipId: null });
   },
 
   selectClip: (clipId) => {
     set({ selectedClipId: clipId });
+  },
+
+  setActiveTool: (tool) => {
+    set({ activeTool: tool });
   },
 
   addMidiTrack: (name) => {
@@ -241,6 +337,183 @@ export const useProjectStore = create<ProjectState>((set) => ({
     });
 
     return createdTrackId;
+  },
+
+  toggleTrackRecordArm: (trackId) => {
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const nextTracks = state.currentProject.tracks.map((track) => {
+        if (track.type !== "midi") {
+          return {
+            ...track,
+            recordArmed: false,
+          };
+        }
+
+        return {
+          ...track,
+          recordArmed: track.id === trackId ? !track.recordArmed : false,
+        };
+      });
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks: nextTracks,
+        }),
+        selectedTrackId: trackId,
+        isProjectModified: true,
+      };
+    });
+  },
+
+  createRecordingMidiClip: (trackId, startTime) => {
+    let clipId: string | null = null;
+
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const clip = createMidiClip(
+        `Take ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+        Math.max(0, startTime),
+      );
+      clipId = clip.id;
+
+      const nextTracks = state.currentProject.tracks.map((track) => {
+        if (track.id !== trackId || track.type !== "midi") {
+          return track;
+        }
+
+        return {
+          ...track,
+          clips: [...track.clips, clip].sort(
+            (left, right) => left.startTime - right.startTime,
+          ),
+        };
+      });
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks: nextTracks,
+        }),
+        selectedTrackId: trackId,
+        selectedClipId: clip.id,
+        isProjectModified: true,
+      };
+    });
+
+    return clipId;
+  },
+
+  appendNotesToClip: (trackId, clipId, notes) => {
+    if (notes.length === 0) {
+      return;
+    }
+
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const nextTracks = state.currentProject.tracks.map((track) => {
+        if (track.id !== trackId) {
+          return track;
+        }
+
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.id !== clipId) {
+              return clip;
+            }
+
+            const nextNotes = [...clip.notes, ...notes].sort(
+              (left, right) => left.startTime - right.startTime,
+            );
+            const duration = nextNotes.reduce((maxDuration, note) => {
+              return Math.max(maxDuration, note.startTime + note.duration);
+            }, 0);
+
+            return {
+              ...clip,
+              duration: Math.max(MIN_CLIP_DURATION, duration),
+              notes: nextNotes,
+            };
+          }),
+        };
+      });
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks: nextTracks,
+        }),
+        isProjectModified: true,
+      };
+    });
+  },
+
+  removeClip: (trackId, clipId) => {
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const targetTrack = state.currentProject.tracks.find(
+        (track) => track.id === trackId,
+      );
+      const removedClipIndex =
+        targetTrack?.clips.findIndex((clip) => clip.id === clipId) ?? -1;
+
+      if (!targetTrack || removedClipIndex === -1) {
+        return state;
+      }
+
+      const nextTracks = state.currentProject.tracks.map((track) => {
+        if (track.id !== trackId) {
+          return track;
+        }
+
+        return {
+          ...track,
+          clips: track.clips.filter((clip) => clip.id !== clipId),
+        };
+      });
+
+      const nextTrack =
+        nextTracks.find((track) => track.id === trackId) ?? null;
+      const fallbackClip =
+        nextTrack?.clips[
+          Math.min(
+            removedClipIndex,
+            Math.max(0, (nextTrack?.clips.length ?? 1) - 1),
+          )
+        ] ?? null;
+      const nextSelectedClipId =
+        state.selectedClipId === clipId
+          ? (fallbackClip?.id ?? null)
+          : state.selectedClipId;
+
+      const transportState = useTransportStore.getState();
+      if (transportState.recordingClipId === clipId) {
+        transportState.stopRecording();
+      }
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks: nextTracks,
+        }),
+        selectedClipId: nextSelectedClipId,
+        isProjectModified: true,
+      };
+    });
   },
 
   addAudioClip: async (trackId, clipInput) => {
@@ -466,17 +739,41 @@ export const useProjectStore = create<ProjectState>((set) => ({
         return state;
       }
 
+      const removedTrackIndex = state.currentProject.tracks.findIndex(
+        (track) => track.id === trackId,
+      );
+
+      if (removedTrackIndex === -1) {
+        return state;
+      }
+
       const tracks = state.currentProject.tracks.filter(
         (track) => track.id !== trackId,
       );
+      const fallbackTrack =
+        tracks[Math.min(removedTrackIndex, Math.max(0, tracks.length - 1))] ??
+        null;
+      const nextSelectedTrackId =
+        state.selectedTrackId === trackId
+          ? (fallbackTrack?.id ?? null)
+          : state.selectedTrackId;
+      const nextSelectedClipId =
+        state.selectedTrackId === trackId
+          ? (fallbackTrack?.clips[0]?.id ?? null)
+          : state.selectedClipId;
+
+      const transportState = useTransportStore.getState();
+      if (transportState.recordingTrackId === trackId) {
+        transportState.stopRecording();
+      }
 
       return {
         currentProject: touchProject({
           ...state.currentProject,
           tracks,
         }),
-        selectedTrackId: tracks[0]?.id ?? null,
-        selectedClipId: null,
+        selectedTrackId: nextSelectedTrackId,
+        selectedClipId: nextSelectedClipId,
         isProjectModified: true,
       };
     });
@@ -532,6 +829,206 @@ export const useProjectStore = create<ProjectState>((set) => ({
               notes,
             };
           }),
+        };
+      });
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks,
+        }),
+        isProjectModified: true,
+      };
+    });
+  },
+
+  moveClip: (trackId, clipId, startTime) => {
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const tracks = state.currentProject.tracks.map((track) => {
+        if (track.id !== trackId) {
+          return track;
+        }
+
+        return {
+          ...track,
+          clips: track.clips
+            .map((clip) =>
+              clip.id === clipId
+                ? {
+                    ...clip,
+                    startTime: Math.max(0, startTime),
+                  }
+                : clip,
+            )
+            .sort((left, right) => left.startTime - right.startTime),
+        };
+      });
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks,
+        }),
+        isProjectModified: true,
+      };
+    });
+  },
+
+  trimClip: (trackId, clipId, startTime, duration, trimMode) => {
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const tracks = state.currentProject.tracks.map((track) => {
+        if (track.id !== trackId) {
+          return track;
+        }
+
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.id !== clipId) {
+              return clip;
+            }
+
+            if (track.type === "audio") {
+              if (trimMode === "start") {
+                const nextStartTime = Math.max(0, startTime);
+                const startDelta = Math.max(0, nextStartTime - clip.startTime);
+                const nextOffset = (clip.audioOffset ?? 0) + startDelta;
+
+                return {
+                  ...clip,
+                  startTime: nextStartTime,
+                  audioOffset: nextOffset,
+                  duration: clampAudioClipDuration({
+                    ...clip,
+                    startTime: nextStartTime,
+                    duration: Math.max(0.05, duration),
+                    audioOffset: nextOffset,
+                  }),
+                };
+              }
+
+              return {
+                ...clip,
+                duration: clampAudioClipDuration({
+                  ...clip,
+                  duration: Math.max(0.05, duration),
+                }),
+              };
+            }
+
+            if (trimMode === "start") {
+              const nextStartTime = Math.max(
+                0,
+                Math.min(startTime, clip.startTime + clip.duration - 0.05),
+              );
+              const trimDelta = Math.max(0, nextStartTime - clip.startTime);
+              const nextDuration = Math.max(0.05, duration);
+
+              return {
+                ...clip,
+                startTime: nextStartTime,
+                duration: nextDuration,
+                notes: clampMidiNotesToWindow(
+                  clip.notes,
+                  trimDelta,
+                  trimDelta + nextDuration,
+                ),
+              };
+            }
+
+            const nextDuration = Math.max(0.05, duration);
+            return {
+              ...clip,
+              duration: nextDuration,
+              notes: clampMidiNotesToWindow(clip.notes, 0, nextDuration),
+            };
+          }),
+        };
+      });
+
+      return {
+        currentProject: touchProject({
+          ...state.currentProject,
+          tracks,
+        }),
+        isProjectModified: true,
+      };
+    });
+  },
+
+  splitClip: (trackId, clipId, splitTime) => {
+    set((state) => {
+      if (!state.currentProject) {
+        return state;
+      }
+
+      const tracks = state.currentProject.tracks.map((track) => {
+        if (track.id !== trackId) {
+          return track;
+        }
+
+        const nextClips: MidiClip[] = [];
+
+        track.clips.forEach((clip) => {
+          if (clip.id !== clipId) {
+            nextClips.push(clip);
+            return;
+          }
+
+          const relativeSplitTime = splitTime - clip.startTime;
+          if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) {
+            nextClips.push(clip);
+            return;
+          }
+
+          if (track.type === "audio") {
+            nextClips.push({
+              ...clip,
+              duration: relativeSplitTime,
+            });
+
+            nextClips.push({
+              ...clip,
+              id: createId(),
+              startTime: splitTime,
+              duration: clip.duration - relativeSplitTime,
+              audioOffset: (clip.audioOffset ?? 0) + relativeSplitTime,
+            });
+            return;
+          }
+
+          nextClips.push({
+            ...clip,
+            duration: relativeSplitTime,
+            notes: clampMidiNotesToWindow(clip.notes, 0, relativeSplitTime),
+          });
+
+          nextClips.push({
+            ...clip,
+            id: createId(),
+            startTime: splitTime,
+            duration: clip.duration - relativeSplitTime,
+            notes: clampMidiNotesToWindow(
+              clip.notes,
+              relativeSplitTime,
+              clip.duration,
+            ),
+          });
+        });
+
+        return {
+          ...track,
+          clips: nextClips.sort(
+            (left, right) => left.startTime - right.startTime,
+          ),
         };
       });
 

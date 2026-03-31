@@ -1,8 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, FileUp, Plus, Save } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  Download,
+  FileUp,
+  MousePointer2,
+  Plus,
+  Save,
+  Scissors,
+  Trash2,
+} from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Slider } from "@/components/ui/slider";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -10,9 +36,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import AudioEditor from "@/components/editor/AudioEditor";
 import { ArrangementView } from "@/components/editor/ArrangementView";
 import MidiPianoRoll from "@/components/editor/MidiPianoRoll";
+import QwertyMidiKeyboardDialog from "@/components/project/QwertyMidiKeyboardDialog";
 import { INSTRUMENTS, getInstrumentDefinition } from "@/audio/instruments";
 import {
   Dialog,
@@ -26,6 +59,7 @@ import { Switch } from "@/components/ui/switch";
 import TransportBar from "@/components/transport/TransportBar";
 import { useAudioEngine } from "@/hooks/useAudioEngine";
 import { useAudioExport } from "@/hooks/useAudioExport";
+import { useMidiInput } from "@/hooks/useMidiInput";
 import { useProjectDatabase } from "@/hooks/useProjectDatabase";
 import { useTransport } from "@/hooks/useTransport";
 import { useProjectStore } from "@/stores/projectStore";
@@ -33,18 +67,123 @@ import {
   getTransportCurrentTime,
   subscribeTransportCurrentTime,
 } from "@/stores/transportStore";
-import type { AafImportDebugHint } from "@/types";
+import type {
+  AafImportDebugHint,
+  LiveMidiMessage,
+  MidiNote,
+  Project,
+  ProjectTool,
+  ProjectTrack,
+} from "@/types";
+import { dispatchLiveMidiCommand } from "@/utils/liveMidiController";
+import { GRID_DIVISIONS, type GridDivision } from "@/utils/grid";
 
 type ExportTarget = "master" | "stems" | "dawproject";
-type ToolMode = "pointer" | "pencil" | "trim";
 
-const GRID_OPTIONS = ["1/4", "1/8", "1/16", "1/32"];
-const TOOL_OPTIONS: Array<{ id: ToolMode; label: string; hint: string }> = [
-  { id: "pointer", label: "Arrow", hint: "Select and move" },
-  { id: "pencil", label: "Draw", hint: "Create notes and clips" },
-  { id: "trim", label: "Trim", hint: "Trim clip edges" },
+const TOOL_OPTIONS: Array<{
+  id: ProjectTool;
+  label: string;
+  hint: string;
+  icon: typeof MousePointer2;
+}> = [
+  {
+    id: "pointer",
+    label: "Move",
+    hint: "Move clips and edit edges",
+    icon: MousePointer2,
+  },
+  {
+    id: "split",
+    label: "Split",
+    hint: "Split clips at the cursor",
+    icon: Scissors,
+  },
+  {
+    id: "trim",
+    label: "Trim",
+    hint: "Trim clip boundaries",
+    icon: ArrowLeftRight,
+  },
 ];
 const LCD_UPDATE_INTERVAL_MS = 80;
+const RECORDING_FLUSH_INTERVAL_MS = 96;
+const MIN_RECORDED_NOTE_DURATION = 0.05;
+const QWERTY_INPUT_ID = "qwerty";
+
+const isEditableTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.isContentEditable
+  );
+};
+
+const HeaderPanelGlyph = ({ panel }: { panel: "editor" | "inspector" }) => (
+  <svg
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className="h-4 w-4"
+    aria-hidden="true"
+  >
+    <rect
+      x="2"
+      y="3"
+      width="16"
+      height="14"
+      rx="2"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    />
+    {panel === "editor" ? (
+      <>
+        <path d="M2 9.5H18" stroke="currentColor" strokeWidth="1.4" />
+        <path
+          d="M6 12.5H14"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+      </>
+    ) : (
+      <>
+        <path d="M12.5 3V17" stroke="currentColor" strokeWidth="1.4" />
+        <path
+          d="M5 7H10"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+      </>
+    )}
+  </svg>
+);
+
+const HeaderActionButton = ({
+  active = false,
+  children,
+  label,
+  onClick,
+}: {
+  active?: boolean;
+  children: ReactNode;
+  label: string;
+  onClick?: () => void;
+}) => (
+  <button
+    type="button"
+    className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition-all active:scale-95 ${active ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100" : "border-white/8 bg-white/5 text-slate-300 hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100"}`}
+    aria-label={label}
+    title={label}
+    onClick={onClick}
+  >
+    {children}
+  </button>
+);
 
 const formatPanLabel = (pan: number) => {
   if (pan > 0) {
@@ -82,34 +221,70 @@ const ProjectPage = () => {
   const audioFileInputRef = useRef<HTMLInputElement | null>(null);
   const lcdBarsBeatsRef = useRef<HTMLParagraphElement | null>(null);
   const lcdClockRef = useRef<HTMLParagraphElement | null>(null);
+  const activeRecordingNotesRef = useRef<
+    Map<string, { pitch: number; startTime: number; velocity: number }>
+  >(new Map());
+  const currentProjectRef = useRef<Project | null>(null);
+  const flushTimeoutRef = useRef<number | null>(null);
   const lastLcdUpdateAtRef = useRef(0);
+  const pendingRecordedNotesRef = useRef<MidiNote[]>([]);
+  const recordingClipIdRef = useRef<string | null>(null);
+  const recordingStartTimeRef = useRef<number | null>(null);
+  const recordingTrackIdRef = useRef<string | null>(null);
+  const selectedTrackRef = useRef<ProjectTrack | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [isDeleteClipDialogOpen, setIsDeleteClipDialogOpen] = useState(false);
+  const [isDeleteTrackDialogOpen, setIsDeleteTrackDialogOpen] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [isQwertyKeyboardOpen, setIsQwertyKeyboardOpen] = useState(false);
   const [exportTarget, setExportTarget] = useState<ExportTarget>("master");
   const [useLoopRangeForExport, setUseLoopRangeForExport] = useState(false);
   const [exportLoopStart, setExportLoopStart] = useState(0);
   const [exportLoopEnd, setExportLoopEnd] = useState(8);
-  const [activeTool, setActiveTool] = useState<ToolMode>("pointer");
-  const [gridDivision, setGridDivision] = useState("1/16");
+  const [gridDivision, setGridDivision] = useState<GridDivision>("1/16");
+  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(true);
   const {
+    activeTool,
     addAudioClip,
     addAudioTrack,
     addMidiTrack,
+    appendNotesToClip,
+    createRecordingMidiClip,
     currentProject,
     currentProjectId,
     importMidiFile,
     loadProject,
     markSaved,
     removeTrack,
+    removeClip,
     selectClip,
     selectTrack,
     selectedClipId,
     selectedTrackId,
+    setActiveTool,
+    toggleTrackRecordArm,
+    updateProjectSettings,
   } = useProjectStore();
   const { getProject, saveProject } = useProjectDatabase();
   const { exportProjectToStems, exportProjectToWav } = useAudioExport();
-  const { isLoopEnabled, isPlaying, loopEnd, loopStart } = useTransport();
+  const {
+    activeInputId,
+    inputMode,
+    isLoopEnabled,
+    isPlaying,
+    isRecording,
+    loopEnd,
+    loopStart,
+    play,
+    recordingClipId,
+    recordingStartTime,
+    recordingTrackId,
+    setActiveInput,
+    startRecording,
+    stopRecording,
+  } = useTransport();
   useAudioEngine();
 
   useEffect(() => {
@@ -149,6 +324,22 @@ const ProjectPage = () => {
     }
   }, [statusMessage]);
 
+  useEffect(() => {
+    if (!isPlaying && isRecording) {
+      finalizeRecordingSession();
+      setStatusMessage("Recording finalized at transport stop.");
+    }
+  }, [isPlaying, isRecording]);
+
+  useEffect(() => {
+    return () => {
+      dispatchLiveMidiCommand({ type: "all-notes-off" });
+      if (flushTimeoutRef.current !== null) {
+        window.clearTimeout(flushTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const selectedTrack = useMemo(() => {
     return (
       currentProject?.tracks.find((track) => track.id === selectedTrackId) ??
@@ -161,6 +352,13 @@ const ProjectPage = () => {
     selectedTrack?.clips.find((clip) => clip.id === selectedClipId) ??
     selectedTrack?.clips[0] ??
     null;
+  const armedMidiTrack = useMemo(() => {
+    return (
+      currentProject?.tracks.find(
+        (track) => track.type === "midi" && track.recordArmed,
+      ) ?? null
+    );
+  }, [currentProject]);
 
   const aafImportMetadata =
     currentProject?.importMetadata?.sourceFormat === "aaf"
@@ -168,6 +366,300 @@ const ProjectPage = () => {
       : null;
   const beatsPerBar = currentProject?.timeSignatureNumerator ?? 4;
   const beatUnit = currentProject?.timeSignatureDenominator ?? 4;
+
+  currentProjectRef.current = currentProject;
+  selectedTrackRef.current = selectedTrack;
+  recordingClipIdRef.current = recordingClipId;
+  recordingStartTimeRef.current = recordingStartTime;
+  recordingTrackIdRef.current = recordingTrackId;
+
+  const flushPendingRecordedNotes = () => {
+    if (flushTimeoutRef.current !== null) {
+      window.clearTimeout(flushTimeoutRef.current);
+      flushTimeoutRef.current = null;
+    }
+
+    const trackId = recordingTrackIdRef.current;
+    const clipId = recordingClipIdRef.current;
+    if (!trackId || !clipId || pendingRecordedNotesRef.current.length === 0) {
+      return;
+    }
+
+    const nextNotes = pendingRecordedNotesRef.current.splice(
+      0,
+      pendingRecordedNotesRef.current.length,
+    );
+    appendNotesToClip(trackId, clipId, nextNotes);
+  };
+
+  const scheduleRecordedNotesFlush = () => {
+    if (flushTimeoutRef.current !== null) {
+      return;
+    }
+
+    flushTimeoutRef.current = window.setTimeout(() => {
+      flushTimeoutRef.current = null;
+      flushPendingRecordedNotes();
+    }, RECORDING_FLUSH_INTERVAL_MS);
+  };
+
+  const finalizeActiveRecordedNote = (noteKey: string, endTime: number) => {
+    const activeNote = activeRecordingNotesRef.current.get(noteKey);
+    const clipStart = recordingStartTimeRef.current;
+    if (!activeNote || clipStart === null) {
+      return;
+    }
+
+    activeRecordingNotesRef.current.delete(noteKey);
+    const relativeStart = Math.max(0, activeNote.startTime - clipStart);
+    const duration = Math.max(
+      MIN_RECORDED_NOTE_DURATION,
+      endTime - activeNote.startTime,
+    );
+
+    pendingRecordedNotesRef.current.push({
+      id: crypto.randomUUID(),
+      pitch: activeNote.pitch,
+      startTime: relativeStart,
+      duration,
+      velocity: activeNote.velocity,
+    });
+    scheduleRecordedNotesFlush();
+  };
+
+  const resolveLiveTargetTrack = () => {
+    const project = currentProjectRef.current;
+    if (!project) {
+      return null;
+    }
+
+    const armedTrack = project.tracks.find(
+      (track) => track.type === "midi" && track.recordArmed,
+    );
+    if (armedTrack) {
+      return armedTrack;
+    }
+
+    if (selectedTrackRef.current?.type === "midi") {
+      return selectedTrackRef.current;
+    }
+
+    return project.tracks.find((track) => track.type === "midi") ?? null;
+  };
+
+  const finalizeRecordingSession = () => {
+    const clipId = recordingClipIdRef.current;
+    const trackId = recordingTrackIdRef.current;
+    const finishTime = getTransportCurrentTime();
+
+    Array.from(activeRecordingNotesRef.current.keys()).forEach((noteKey) => {
+      finalizeActiveRecordedNote(noteKey, finishTime);
+    });
+    flushPendingRecordedNotes();
+    activeRecordingNotesRef.current.clear();
+    stopRecording();
+
+    if (!trackId || !clipId) {
+      return;
+    }
+
+    const clip = useProjectStore
+      .getState()
+      .currentProject?.tracks.find((track) => track.id === trackId)
+      ?.clips.find((candidate) => candidate.id === clipId);
+
+    if (!clip || clip.notes.length > 0) {
+      return;
+    }
+
+    removeClip(trackId, clipId);
+  };
+
+  const handleDeleteSelectedMidiTrack = () => {
+    if (selectedTrack?.type !== "midi") {
+      return;
+    }
+
+    const deletedTrackName = selectedTrack.name;
+
+    if (isRecording && recordingTrackIdRef.current === selectedTrack.id) {
+      finalizeRecordingSession();
+    }
+
+    removeTrack(selectedTrack.id);
+    setIsDeleteTrackDialogOpen(false);
+    setStatusMessage(`${deletedTrackName} was removed.`);
+  };
+
+  const handleDeleteSelectedMidiClip = () => {
+    if (selectedTrack?.type !== "midi" || !selectedClip) {
+      return;
+    }
+
+    const deletedClipName = selectedClip.name;
+
+    if (isRecording && recordingClipIdRef.current === selectedClip.id) {
+      finalizeRecordingSession();
+    }
+
+    removeClip(selectedTrack.id, selectedClip.id);
+    setIsDeleteClipDialogOpen(false);
+    setStatusMessage(`${deletedClipName} was removed.`);
+  };
+
+  const handleLiveMidiMessage = (message: LiveMidiMessage) => {
+    const targetTrack = resolveLiveTargetTrack();
+    if (!targetTrack) {
+      return;
+    }
+
+    const noteKey = `${message.sourceId}:${message.channel}:${message.pitch}`;
+
+    if (message.type === "noteon") {
+      dispatchLiveMidiCommand({
+        type: "noteon",
+        trackId: targetTrack.id,
+        noteKey,
+        pitch: message.pitch,
+        velocity: message.velocity,
+      });
+
+      if (
+        isRecording &&
+        recordingTrackIdRef.current === targetTrack.id &&
+        recordingStartTimeRef.current !== null
+      ) {
+        const currentTime = getTransportCurrentTime();
+        finalizeActiveRecordedNote(noteKey, currentTime);
+        activeRecordingNotesRef.current.set(noteKey, {
+          pitch: message.pitch,
+          startTime: currentTime,
+          velocity: message.velocity,
+        });
+      }
+      return;
+    }
+
+    dispatchLiveMidiCommand({
+      type: "noteoff",
+      trackId: targetTrack.id,
+      noteKey,
+    });
+
+    if (isRecording && recordingTrackIdRef.current === targetTrack.id) {
+      finalizeActiveRecordedNote(noteKey, getTransportCurrentTime());
+    }
+  };
+
+  const {
+    activeInput,
+    activeInputId: selectedInputId,
+    inputMode: selectedInputMode,
+    inputs,
+    isWebMidiSupported,
+    pressedQwertyKeys,
+    pressQwertyKey,
+    releaseAllQwertyKeys,
+    releaseQwertyKey,
+    setActiveInputId: setMidiInputId,
+    supportMessage,
+  } = useMidiInput({
+    onMessage: handleLiveMidiMessage,
+  });
+
+  const openQwertyKeyboard = () => {
+    setMidiInputId(QWERTY_INPUT_ID);
+
+    if (!armedMidiTrack) {
+      const fallbackTrack =
+        (selectedTrack?.type === "midi" ? selectedTrack : null) ??
+        currentProject?.tracks.find((track) => track.type === "midi") ??
+        null;
+
+      if (fallbackTrack) {
+        toggleTrackRecordArm(fallbackTrack.id);
+        setStatusMessage(`${fallbackTrack.name} armed for QWERTY MIDI.`);
+      } else {
+        setStatusMessage("Add a MIDI track to use the QWERTY keyboard.");
+      }
+    }
+
+    setIsQwertyKeyboardOpen(true);
+  };
+
+  useEffect(() => {
+    setActiveInput(selectedInputMode, selectedInputId);
+  }, [selectedInputId, selectedInputMode, setActiveInput]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== "k"
+      ) {
+        return;
+      }
+
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      if (isQwertyKeyboardOpen) {
+        setIsQwertyKeyboardOpen(false);
+        return;
+      }
+
+      openQwertyKeyboard();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isQwertyKeyboardOpen, openQwertyKeyboard]);
+
+  useEffect(() => {
+    dispatchLiveMidiCommand({ type: "all-notes-off" });
+  }, [selectedInputId]);
+
+  useEffect(() => {
+    if (!isQwertyKeyboardOpen) {
+      releaseAllQwertyKeys();
+    }
+  }, [isQwertyKeyboardOpen, releaseAllQwertyKeys]);
+
+  const handleToggleRecording = () => {
+    if (isRecording) {
+      finalizeRecordingSession();
+      setStatusMessage("MIDI recording stopped.");
+      return;
+    }
+
+    if (!armedMidiTrack) {
+      setStatusMessage("Arm one MIDI track before recording.");
+      return;
+    }
+
+    const startTime = getTransportCurrentTime();
+    const clipId = createRecordingMidiClip(armedMidiTrack.id, startTime);
+    if (!clipId) {
+      setStatusMessage("Unable to create a recording clip.");
+      return;
+    }
+
+    pendingRecordedNotesRef.current = [];
+    activeRecordingNotesRef.current.clear();
+    startRecording({
+      trackId: armedMidiTrack.id,
+      clipId,
+      startTime,
+    });
+
+    if (!isPlaying) {
+      play();
+    }
+
+    setStatusMessage(`Recording armed to ${armedMidiTrack.name}.`);
+  };
 
   const selectedAafHint = useMemo<AafImportDebugHint | null>(() => {
     if (!aafImportMetadata?.aafHints?.length || !selectedTrack) {
@@ -188,6 +680,13 @@ const ProjectPage = () => {
       null
     );
   }, [aafImportMetadata, selectedClip?.audioFileName, selectedTrack]);
+  const inputModeLabel = selectedInputMode === "qwerty" ? "QWERTY" : "Web MIDI";
+  const inputLabel = activeInput?.name ?? "Computer Keyboard";
+  const inputHint =
+    supportMessage ??
+    (selectedInputMode === "qwerty"
+      ? "Use the Z-M and Q-P rows to play notes from the computer keyboard."
+      : "Arm a MIDI track and play from the selected controller.");
 
   useEffect(() => {
     if (!currentProject) {
@@ -217,6 +716,34 @@ const ProjectPage = () => {
     updateDisplay(getTransportCurrentTime());
     return subscribeTransportCurrentTime(updateDisplay);
   }, [beatsPerBar, currentProject]);
+
+  const handleTempoChange = (value: string) => {
+    const nextBpm = Number(value);
+    if (Number.isNaN(nextBpm)) {
+      return;
+    }
+
+    updateProjectSettings({
+      bpm: Math.min(300, Math.max(20, Math.round(nextBpm))),
+    });
+  };
+
+  const handleTimeSignatureChange = (
+    field: "timeSignatureNumerator" | "timeSignatureDenominator",
+    value: string,
+  ) => {
+    const nextValue = Number(value);
+    if (Number.isNaN(nextValue)) {
+      return;
+    }
+
+    updateProjectSettings({
+      [field]: Math.min(
+        field === "timeSignatureNumerator" ? 12 : 16,
+        Math.max(1, Math.round(nextValue)),
+      ),
+    });
+  };
 
   const handleSave = async () => {
     if (!currentProject) {
@@ -371,7 +898,7 @@ const ProjectPage = () => {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-daw-surface0 font-body text-slate-100 selection:bg-cyan-500/30">
-      <header className="z-10 grid min-h-[88px] shrink-0 grid-cols-[minmax(280px,1fr)_minmax(340px,520px)_minmax(320px,1fr)] items-center gap-4 border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(17,22,34,0.96),rgba(9,12,20,0.94))] px-4 py-3 backdrop-blur-md">
+      <header className="z-10 grid min-h-[88px] shrink-0 grid-cols-[minmax(260px,1fr)_minmax(360px,560px)_minmax(280px,1fr)] items-center gap-4 border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(17,22,34,0.96),rgba(9,12,20,0.94))] px-4 py-3 backdrop-blur-md">
         <div className="flex min-w-0 items-center gap-4">
           <Link
             to="/"
@@ -393,14 +920,17 @@ const ProjectPage = () => {
             <div className="flex flex-wrap items-center gap-2">
               {TOOL_OPTIONS.map((tool) => {
                 const isActive = tool.id === activeTool;
+                const Icon = tool.icon;
                 return (
                   <button
                     key={tool.id}
                     type="button"
-                    className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] font-semibold tracking-[0.14em] transition-all ${isActive ? "border-cyan-400/50 bg-cyan-400/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.12)]" : "border-white/8 bg-white/5 text-slate-400 hover:border-white/14 hover:bg-white/10 hover:text-slate-200"}`}
+                    className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-[11px] font-semibold tracking-[0.14em] transition-all ${isActive ? "border-cyan-400/50 bg-cyan-400/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.12)]" : "border-white/8 bg-white/5 text-slate-400 hover:border-white/14 hover:bg-white/10 hover:text-slate-200"}`}
                     onClick={() => setActiveTool(tool.id)}
                     title={tool.hint}
+                    aria-pressed={isActive}
                   >
+                    <Icon className="h-3.5 w-3.5" />
                     {tool.label}
                   </button>
                 );
@@ -415,24 +945,58 @@ const ProjectPage = () => {
               <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
                 Tempo
               </p>
-              <p className="daw-lcd-readout mt-1 text-lg font-semibold">
-                {currentProject.bpm}
-              </p>
+              <input
+                type="number"
+                min={20}
+                max={300}
+                value={currentProject.bpm}
+                onChange={(event) => handleTempoChange(event.target.value)}
+                className="daw-lcd-readout mt-1 w-full bg-transparent text-lg font-semibold outline-none"
+                aria-label="Project tempo"
+              />
             </div>
             <div className="rounded-2xl border border-white/5 bg-black/20 px-3 py-2">
               <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
                 Meter
               </p>
-              <p className="daw-lcd-readout mt-1 text-lg font-semibold">
-                {beatsPerBar}/{beatUnit}
-              </p>
+              <div className="mt-1 flex items-center gap-1 daw-lcd-readout text-lg font-semibold">
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={beatsPerBar}
+                  onChange={(event) =>
+                    handleTimeSignatureChange(
+                      "timeSignatureNumerator",
+                      event.target.value,
+                    )
+                  }
+                  className="w-8 bg-transparent text-center outline-none"
+                  aria-label="Time signature numerator"
+                />
+                <span>/</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={beatUnit}
+                  onChange={(event) =>
+                    handleTimeSignatureChange(
+                      "timeSignatureDenominator",
+                      event.target.value,
+                    )
+                  }
+                  className="w-8 bg-transparent text-center outline-none"
+                  aria-label="Time signature denominator"
+                />
+              </div>
             </div>
             <div className="rounded-2xl border border-white/5 bg-black/20 px-3 py-2">
               <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
                 Grid
               </p>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {GRID_OPTIONS.map((option) => (
+                {GRID_DIVISIONS.map((option) => (
                   <button
                     key={option}
                     type="button"
@@ -467,663 +1031,842 @@ const ProjectPage = () => {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="mr-2 hidden rounded-full border border-white/8 bg-white/5 px-3 py-1 text-[11px] font-semibold tracking-[0.16em] text-slate-300 xl:inline-flex">
-            {isPlaying ? "Playing" : "Standby"}
+        <TooltipProvider delayDuration={120}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="mr-1 hidden rounded-full border border-white/8 bg-white/5 px-3 py-1 text-[11px] font-semibold tracking-[0.16em] text-slate-300 xl:inline-flex">
+              {isPlaying ? "Playing" : "Standby"}
+            </div>
+            {statusMessage && (
+              <span className="mr-1 animate-in fade-in slide-in-from-right-2 text-xs font-medium tracking-wide text-cyan-300/85">
+                {statusMessage}
+              </span>
+            )}
+
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <HeaderActionButton label="Add track">
+                      <Plus className="h-4 w-4" />
+                    </HeaderActionButton>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Add track</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent
+                align="end"
+                className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100"
+              >
+                <DropdownMenuItem
+                  className="rounded-xl focus:bg-white/8"
+                  onClick={() => addMidiTrack()}
+                >
+                  Add MIDI track
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="rounded-xl focus:bg-white/8"
+                  onClick={() => addAudioTrack()}
+                >
+                  Add audio track
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <HeaderActionButton label="Import assets">
+                      <FileUp className="h-4 w-4" />
+                    </HeaderActionButton>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Import</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent
+                align="end"
+                className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100"
+              >
+                <DropdownMenuItem
+                  className="rounded-xl focus:bg-white/8"
+                  onClick={() => midiFileInputRef.current?.click()}
+                >
+                  Import MIDI
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="rounded-xl focus:bg-white/8"
+                  onClick={() => audioFileInputRef.current?.click()}
+                >
+                  Import audio
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HeaderActionButton
+                  label="Export project"
+                  onClick={() => setIsExportDialogOpen(true)}
+                >
+                  <Download className="h-4 w-4" />
+                </HeaderActionButton>
+              </TooltipTrigger>
+              <TooltipContent>Export</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HeaderActionButton
+                  label="Save project"
+                  onClick={() => void handleSave()}
+                  active={!isBusy}
+                >
+                  <Save className="h-4 w-4" />
+                </HeaderActionButton>
+              </TooltipTrigger>
+              <TooltipContent>Save</TooltipContent>
+            </Tooltip>
+
+            <div className="mx-1 hidden h-5 w-px bg-white/10 lg:block" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HeaderActionButton
+                  label={
+                    isBottomPanelOpen
+                      ? "Hide detail editor"
+                      : "Show detail editor"
+                  }
+                  active={isBottomPanelOpen}
+                  onClick={() => setIsBottomPanelOpen((current) => !current)}
+                >
+                  <HeaderPanelGlyph panel="editor" />
+                </HeaderActionButton>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isBottomPanelOpen
+                  ? "Hide detail editor"
+                  : "Show detail editor"}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HeaderActionButton
+                  label={isInspectorOpen ? "Hide inspector" : "Show inspector"}
+                  active={isInspectorOpen}
+                  onClick={() => setIsInspectorOpen((current) => !current)}
+                >
+                  <HeaderPanelGlyph panel="inspector" />
+                </HeaderActionButton>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isInspectorOpen ? "Hide inspector" : "Show inspector"}
+              </TooltipContent>
+            </Tooltip>
+
+            <input
+              ref={midiFileInputRef}
+              type="file"
+              accept=".mid,.midi,audio/midi"
+              className="hidden"
+              onChange={handleImportMidi}
+            />
+            <input
+              ref={audioFileInputRef}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={handleImportAudio}
+            />
           </div>
-          {statusMessage && (
-            <span className="mr-2 animate-in fade-in slide-in-from-right-2 text-xs font-medium tracking-wide text-cyan-300/85">
-              {statusMessage}
-            </span>
-          )}
-          <button
-            type="button"
-            className="inline-flex h-9 items-center rounded-xl border border-white/8 bg-white/5 px-3 text-xs font-medium text-slate-200 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100 active:scale-95"
-            onClick={() => addMidiTrack()}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Add MIDI
-          </button>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center rounded-xl border border-white/8 bg-white/5 px-3 text-xs font-medium text-slate-200 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100 active:scale-95"
-            onClick={() => addAudioTrack()}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Add Audio
-          </button>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center rounded-xl border border-white/8 bg-white/5 px-3 text-xs font-medium text-slate-200 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100 active:scale-95"
-            onClick={() => midiFileInputRef.current?.click()}
-          >
-            <FileUp className="mr-1.5 h-3.5 w-3.5" />
-            Import MIDI
-          </button>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center rounded-xl border border-white/8 bg-white/5 px-3 text-xs font-medium text-slate-200 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100 active:scale-95"
-            onClick={() => audioFileInputRef.current?.click()}
-          >
-            <FileUp className="mr-1.5 h-3.5 w-3.5" />
-            Import Audio
-          </button>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center rounded-xl border border-white/8 bg-white/5 px-3 text-xs font-medium text-slate-200 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100 active:scale-95"
-            onClick={() => setIsExportDialogOpen(true)}
-          >
-            <Save className="mr-1.5 h-3.5 w-3.5" />
-            Export
-          </button>
-          <div className="mx-1 hidden h-5 w-px bg-white/10 lg:block" />
-          <button
-            type="button"
-            className="inline-flex h-9 items-center rounded-xl bg-cyan-500/12 px-4 text-xs font-medium text-cyan-100 ring-1 ring-inset ring-cyan-400/30 transition-all hover:bg-cyan-500/22 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-            onClick={() => void handleSave()}
-            disabled={isBusy}
-          >
-            <Save className="mr-2 h-3.5 w-3.5" />
-            Save
-          </button>
-          <input
-            ref={midiFileInputRef}
-            type="file"
-            accept=".mid,.midi,audio/midi"
-            className="hidden"
-            onChange={handleImportMidi}
-          />
-          <input
-            ref={audioFileInputRef}
-            type="file"
-            accept="audio/*"
-            className="hidden"
-            onChange={handleImportAudio}
-          />
-        </div>
+        </TooltipProvider>
       </header>
 
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal">
           <Panel
-            defaultSize={80}
+            defaultSize={isInspectorOpen ? 78 : 100}
             minSize={50}
             className="flex flex-col bg-[hsl(var(--daw-surface-1))]"
           >
             <PanelGroup direction="vertical">
               <Panel
-                defaultSize={60}
+                defaultSize={isBottomPanelOpen ? 62 : 100}
                 minSize={20}
                 className="flex overflow-hidden"
               >
-                <PanelGroup direction="horizontal">
-                  <Panel
-                    defaultSize={20}
-                    minSize={15}
-                    maxSize={30}
-                    className="z-10 flex flex-col border-r border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,hsl(var(--daw-surface-2)),hsl(var(--daw-surface-1)))] shadow-[18px_0_42px_rgba(0,0,0,0.24)]"
-                  >
-                    <div className="flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--daw-panel-border))] bg-white/5 px-4">
-                      <h2 className="daw-panel-title">
-                        Tracks
-                      </h2>
-                      <span className="rounded-full bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">
-                        {currentProject.tracks.length}
-                      </span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto overflow-x-hidden">
-                      {currentProject.tracks.length === 0 ? (
-                        <div className="mx-3 mt-4 rounded-2xl border border-dashed border-white/10 p-4 text-center text-xs text-slate-400">
-                          <p>Add a track to start</p>
-                        </div>
-                      ) : (
-                        currentProject.tracks.map((track, index) => {
-                          const isSelected = track.id === selectedTrack?.id;
-                          const trackColor = track.trackColor ??
-                            (track.type === "audio"
-                              ? "var(--daw-track-audio)"
-                              : "var(--daw-track-midi)");
+                <ArrangementView gridDivision={gridDivision} />
+              </Panel>
 
-                          return (
-                            <div
-                              key={track.id}
-                              className={`group relative flex h-[84px] w-full cursor-pointer flex-col justify-center border-b border-white/5 px-4 py-3 text-left transition-all ${isSelected ? "bg-[hsl(var(--daw-track-row-selected)/0.85)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]" : "hover:bg-[hsl(var(--daw-track-row-hover)/0.9)]"}`}
-                              onClick={() => {
-                                selectTrack(track.id);
-                                selectClip(null);
+              {isBottomPanelOpen && (
+                <>
+                  <PanelResizeHandle className="z-20 h-[4px] cursor-row-resize bg-[hsl(var(--daw-panel-border))] transition-colors hover:bg-cyan-500/50" />
+
+                  <Panel
+                    defaultSize={38}
+                    minSize={20}
+                    className="relative flex flex-col bg-[linear-gradient(180deg,hsl(var(--daw-surface-0)),hsl(var(--daw-surface-1)))] shadow-[0_-10px_28px_rgba(0,0,0,0.28)]"
+                  >
+                    {selectedTrack ? (
+                      selectedTrack.type === "audio" ? (
+                        <AudioEditor
+                          track={selectedTrack}
+                          gridDivision={gridDivision}
+                        />
+                      ) : (
+                        <MidiPianoRoll
+                          track={selectedTrack}
+                          clip={selectedClip}
+                          duration={currentProject.duration}
+                          bpm={currentProject.bpm}
+                          beatsPerBar={beatsPerBar}
+                          gridDivision={gridDivision}
+                        />
+                      )
+                    ) : (
+                      <div className="flex flex-1 items-center justify-center text-sm font-medium text-slate-600">
+                        Select a track or clip to edit
+                      </div>
+                    )}
+                  </Panel>
+                </>
+              )}
+            </PanelGroup>
+          </Panel>
+
+          {isInspectorOpen && (
+            <>
+              <PanelResizeHandle className="group relative z-10 w-[4px] bg-[hsl(var(--daw-panel-border))] outline-none">
+                <div className="absolute inset-y-0 -inset-x-2 cursor-col-resize transition-colors group-hover:bg-cyan-500/24 group-active:bg-cyan-500/44" />
+                <div className="absolute left-1/2 top-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/12 opacity-80 transition-colors group-hover:bg-cyan-300" />
+              </PanelResizeHandle>
+
+              <Panel
+                defaultSize={22}
+                minSize={15}
+                maxSize={30}
+                className="flex flex-col border-l border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,hsl(var(--daw-surface-2)),hsl(var(--daw-surface-1)))]"
+              >
+                <div className="flex h-12 shrink-0 items-center border-b border-[hsl(var(--daw-panel-border))] bg-white/5 px-4">
+                  <h2 className="daw-panel-title">Inspector</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto overflow-x-hidden p-4">
+                  {selectedTrack ? (
+                    <div className="space-y-5">
+                      <div>
+                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                          <div className="h-px flex-1 bg-white/10"></div>
+                          Track Properties
+                          <div className="h-px flex-1 bg-white/10"></div>
+                        </h3>
+                        <dl className="space-y-3">
+                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-3">
+                            <div className="mb-2 flex items-center justify-between">
+                              <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Instrument
+                              </dt>
+                              <dd className="text-[11px] font-semibold text-slate-200">
+                                {selectedTrack.type === "midi"
+                                  ? getInstrumentDefinition(
+                                      selectedTrack.instrument.patchId,
+                                    ).type
+                                  : "Sampler"}
+                              </dd>
+                            </div>
+                            <dd>
+                              {selectedTrack.type === "midi" ? (
+                                <Select
+                                  value={
+                                    selectedTrack.instrument.patchId ||
+                                    "basic-synth"
+                                  }
+                                  onValueChange={(value) => {
+                                    const instrumentDefinition =
+                                      getInstrumentDefinition(value);
+                                    useProjectStore
+                                      .getState()
+                                      .updateTrack(selectedTrack.id, {
+                                        instrument: {
+                                          type: instrumentDefinition.type,
+                                          patchId: value,
+                                          parameters: {},
+                                        },
+                                      });
+                                  }}
+                                >
+                                  <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
+                                    <SelectValue placeholder="Select an instrument" />
+                                  </SelectTrigger>
+                                  <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
+                                    {Object.values(INSTRUMENTS).map(
+                                      (instrument) => (
+                                        <SelectItem
+                                          key={instrument.id}
+                                          value={instrument.id}
+                                          className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                                        >
+                                          {instrument.name}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                selectedTrack.instrument.patchId ||
+                                selectedTrack.instrument.type
+                              )}
+                            </dd>
+                          </div>
+                          <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
+                            <div className="flex items-center justify-between">
+                              <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Volume
+                              </dt>
+                              <dd className="font-mono text-xs font-semibold text-cyan-100">
+                                {Math.round(selectedTrack.volume * 100)}%
+                              </dd>
+                            </div>
+                            <Slider
+                              value={[selectedTrack.volume]}
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              onValueChange={(value) => {
+                                useProjectStore
+                                  .getState()
+                                  .updateTrack(selectedTrack.id, {
+                                    volume: value[0] ?? selectedTrack.volume,
+                                  });
                               }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(event) => {
-                                if (
-                                  event.key === "Enter" ||
-                                  event.key === " "
-                                ) {
-                                  event.preventDefault();
-                                  selectTrack(track.id);
-                                  selectClip(null);
-                                }
+                              aria-label={`${selectedTrack.name} volume`}
+                              className="w-full"
+                            />
+                          </div>
+                          <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
+                            <div className="flex items-center justify-between">
+                              <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Pan
+                              </dt>
+                              <dd className="font-mono text-xs font-semibold text-slate-200">
+                                {formatPanLabel(selectedTrack.pan)}
+                              </dd>
+                            </div>
+                            <Slider
+                              value={[selectedTrack.pan]}
+                              min={-1}
+                              max={1}
+                              step={0.01}
+                              onValueChange={(value) => {
+                                useProjectStore
+                                  .getState()
+                                  .updateTrack(selectedTrack.id, {
+                                    pan: value[0] ?? selectedTrack.pan,
+                                  });
                               }}
-                            >
-                              <div
-                                className="absolute inset-y-2 left-0 w-1 rounded-r-full"
-                                style={{
-                                  backgroundColor:
-                                    trackColor.startsWith("var")
-                                      ? `hsl(${trackColor})`
-                                      : `hsl(${trackColor})`,
-                                }}
-                              />
-                              <div className="mb-3 flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="mb-1 flex items-center gap-2">
-                                    <span
-                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/10 text-[10px] font-bold uppercase text-slate-100"
-                                      style={{
-                                        backgroundColor:
-                                          trackColor.startsWith("var")
-                                            ? `hsl(${trackColor})`
-                                            : `hsl(${trackColor})`,
-                                      }}
-                                    >
-                                      {track.type === "audio" ? "A" : "M"}
-                                    </span>
-                                    <p
-                                      className={`truncate text-sm font-semibold tracking-tight ${isSelected ? "text-cyan-50" : "text-slate-100"}`}
-                                    >
-                                      {track.name}
-                                    </p>
-                                  </div>
+                              aria-label={`${selectedTrack.name} pan`}
+                              className="w-full"
+                            />
+                          </div>
+                        </dl>
+                      </div>
+
+                      <div>
+                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                          <div className="h-px flex-1 bg-white/10"></div>
+                          Live Input
+                          <div className="h-px flex-1 bg-white/10"></div>
+                        </h3>
+                        <div className="space-y-3">
+                          <div className="overflow-hidden rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(30,17,26,0.92),rgba(12,16,24,0.98))] shadow-[0_20px_36px_rgba(0,0,0,0.24)]">
+                            <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+                              <div>
+                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-rose-200/90">
+                                  Input Router
+                                </p>
+                                <p className="mt-1 text-sm font-semibold text-slate-100">
+                                  {inputLabel}
+                                </p>
+                              </div>
+                              <span
+                                className={`rounded-full px-3 py-1 font-mono text-[10px] ${selectedInputMode === "qwerty" ? "bg-amber-400/12 text-amber-200" : "bg-cyan-400/12 text-cyan-100"}`}
+                              >
+                                {inputModeLabel}
+                              </span>
+                            </div>
+                            <div className="space-y-3 px-4 py-4">
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                  Active Source
+                                </p>
+                                <Select
+                                  value={selectedInputId}
+                                  onValueChange={setMidiInputId}
+                                >
+                                  <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
+                                    <SelectValue placeholder="Select live input" />
+                                  </SelectTrigger>
+                                  <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
+                                    {inputs.map((input) => (
+                                      <SelectItem
+                                        key={input.id}
+                                        value={input.id}
+                                        className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                                      >
+                                        {input.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-3">
                                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                    {track.type === "audio"
-                                      ? "Audio track"
-                                      : "Instrument track"}{" "}
-                                    #{index + 1}
+                                    Record Target
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-slate-100">
+                                    {armedMidiTrack?.name ??
+                                      "No armed MIDI track"}
+                                  </p>
+                                </div>
+                                <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-3">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                    Browser Path
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-slate-100">
+                                    {isWebMidiSupported
+                                      ? "Web MIDI + fallback"
+                                      : "QWERTY fallback only"}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-3">
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                    Track Arm
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-slate-100">
+                                    {selectedTrack?.type === "midi"
+                                      ? selectedTrack.recordArmed
+                                        ? "Selected MIDI track is armed"
+                                        : "Arm the selected MIDI track for capture"
+                                      : "Select a MIDI track to arm recording"}
                                   </p>
                                 </div>
                                 <button
                                   type="button"
-                                  className="shrink-0 rounded-full p-1 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    removeTrack(track.id);
+                                  className={`flex min-w-24 items-center justify-center rounded-2xl border px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] transition-all ${selectedTrack?.type === "midi" ? (selectedTrack.recordArmed ? "border-rose-400/50 bg-rose-500/18 text-rose-100 shadow-[0_0_18px_rgba(244,63,94,0.28)]" : "border-white/10 bg-white/5 text-slate-200 hover:border-rose-400/40 hover:text-rose-100") : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
+                                  onClick={() => {
+                                    if (selectedTrack?.type === "midi") {
+                                      toggleTrackRecordArm(selectedTrack.id);
+                                    }
                                   }}
-                                  aria-label={`Remove ${track.name}`}
+                                  disabled={selectedTrack?.type !== "midi"}
                                 >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="12"
-                                    height="12"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2.5"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <path d="M18 6 6 18" />
-                                    <path d="m6 6 12 12" />
-                                  </svg>
+                                  {selectedTrack?.type === "midi" &&
+                                  selectedTrack.recordArmed
+                                    ? "Armed"
+                                    : "Arm"}
                                 </button>
                               </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    className={`flex h-6 w-6 items-center justify-center rounded-full border text-[9px] font-bold transition-all ${track.muted ? "border-red-500/40 bg-red-500/20 text-red-200" : "border-white/10 bg-black/20 text-slate-400 hover:text-slate-200"}`}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      useProjectStore
-                                        .getState()
-                                        .updateTrack(track.id, {
-                                          muted: !track.muted,
-                                        });
-                                    }}
-                                    title="Mute"
-                                  >
-                                    M
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`flex h-6 w-6 items-center justify-center rounded-full border text-[9px] font-bold transition-all ${track.solo ? "border-yellow-500/40 bg-yellow-500/20 text-yellow-100" : "border-white/10 bg-black/20 text-slate-400 hover:text-slate-200"}`}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      useProjectStore
-                                        .getState()
-                                        .updateTrack(track.id, {
-                                          solo: !track.solo,
-                                        });
-                                    }}
-                                    title="Solo"
-                                  >
-                                    S
-                                  </button>
-                                </div>
 
-                                <div
-                                  className="flex flex-1 items-center gap-3"
-                                  onClick={(event) => event.stopPropagation()}
+                              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-3">
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                    Delete Track
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-slate-100">
+                                    {selectedTrack?.type === "midi"
+                                      ? "Remove the selected MIDI track and its clips"
+                                      : "Select a MIDI track to delete it"}
+                                  </p>
+                                </div>
+                                <AlertDialog
+                                  open={isDeleteTrackDialogOpen}
+                                  onOpenChange={setIsDeleteTrackDialogOpen}
                                 >
-                                  <span className="w-10 font-mono text-[10px] text-slate-400">
-                                    {Math.round(track.volume * 100)}%
-                                  </span>
-                                  <Slider
-                                    value={[track.volume]}
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    onValueChange={(value) => {
-                                      useProjectStore
-                                        .getState()
-                                        .updateTrack(track.id, {
-                                          volume: value[0] ?? track.volume,
-                                        });
+                                  <button
+                                    type="button"
+                                    className={`flex min-w-24 items-center justify-center gap-2 rounded-2xl border px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] transition-all ${selectedTrack?.type === "midi" ? "border-red-400/40 bg-red-500/12 text-red-100 hover:border-red-300/60 hover:bg-red-500/18" : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
+                                    onClick={() => {
+                                      if (selectedTrack?.type === "midi") {
+                                        setIsDeleteTrackDialogOpen(true);
+                                      }
                                     }}
-                                    aria-label={`${track.name} volume`}
-                                    className="w-full"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </Panel>
-
-                  <PanelResizeHandle className="w-[4px] cursor-col-resize bg-[hsl(var(--daw-panel-border))] transition-colors hover:bg-cyan-500/50" />
-
-                  <Panel defaultSize={80} className="relative bg-[hsl(var(--daw-surface-3))]">
-                    <ArrangementView />
-                  </Panel>
-                </PanelGroup>
-              </Panel>
-
-              <PanelResizeHandle className="z-20 h-[4px] cursor-row-resize bg-[hsl(var(--daw-panel-border))] transition-colors hover:bg-cyan-500/50" />
-
-              <Panel
-                defaultSize={40}
-                minSize={20}
-                className="relative flex flex-col bg-[linear-gradient(180deg,hsl(var(--daw-surface-0)),hsl(var(--daw-surface-1)))] shadow-[0_-10px_28px_rgba(0,0,0,0.28)]"
-              >
-                {selectedTrack ? (
-                  selectedTrack.type === "audio" ? (
-                    <AudioEditor track={selectedTrack} />
-                  ) : (
-                    <MidiPianoRoll
-                      track={selectedTrack}
-                      clip={selectedClip}
-                      duration={currentProject.duration}
-                      bpm={currentProject.bpm}
-                    />
-                  )
-                ) : (
-                  <div className="flex flex-1 items-center justify-center text-sm font-medium text-slate-600">
-                    Select a track or clip to edit
-                  </div>
-                )}
-              </Panel>
-            </PanelGroup>
-          </Panel>
-
-          <PanelResizeHandle className="group relative z-10 w-[4px] bg-[hsl(var(--daw-panel-border))] outline-none">
-            <div className="absolute inset-y-0 -inset-x-2 cursor-col-resize transition-colors group-hover:bg-cyan-500/24 group-active:bg-cyan-500/44" />
-            <div className="absolute left-1/2 top-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/12 opacity-80 transition-colors group-hover:bg-cyan-300" />
-          </PanelResizeHandle>
-
-          <Panel
-            defaultSize={20}
-            minSize={15}
-            maxSize={30}
-            className="flex flex-col border-l border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,hsl(var(--daw-surface-2)),hsl(var(--daw-surface-1)))]"
-          >
-            <div className="flex h-12 shrink-0 items-center border-b border-[hsl(var(--daw-panel-border))] bg-white/5 px-4">
-              <h2 className="daw-panel-title">
-                Inspector
-              </h2>
-            </div>
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4">
-              {selectedTrack ? (
-                <div className="space-y-5">
-                  <div>
-                    <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                      <div className="h-px flex-1 bg-white/10"></div>
-                      Track Properties
-                      <div className="h-px flex-1 bg-white/10"></div>
-                    </h3>
-                    <dl className="space-y-3">
-                      <div className="rounded-[22px] border border-white/8 bg-black/18 p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Instrument
-                          </dt>
-                          <dd className="text-[11px] font-semibold text-slate-200">
-                            {selectedTrack.type === "midi"
-                              ? getInstrumentDefinition(
-                                  selectedTrack.instrument.patchId,
-                                ).type
-                              : "Sampler"}
-                          </dd>
-                        </div>
-                        <dd>
-                          {selectedTrack.type === "midi" ? (
-                            <Select
-                              value={
-                                selectedTrack.instrument.patchId ||
-                                "basic-synth"
-                              }
-                              onValueChange={(value) => {
-                                const instrumentDefinition =
-                                  getInstrumentDefinition(value);
-                                useProjectStore
-                                  .getState()
-                                  .updateTrack(selectedTrack.id, {
-                                    instrument: {
-                                      type: instrumentDefinition.type,
-                                      patchId: value,
-                                      parameters: {},
-                                    },
-                                  });
-                              }}
-                            >
-                              <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
-                                <SelectValue placeholder="Select an instrument" />
-                              </SelectTrigger>
-                              <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
-                                {Object.values(INSTRUMENTS).map((instrument) => (
-                                  <SelectItem
-                                    key={instrument.id}
-                                    value={instrument.id}
-                                    className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                                    disabled={selectedTrack?.type !== "midi"}
                                   >
-                                    {instrument.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            selectedTrack.instrument.patchId ||
-                            selectedTrack.instrument.type
-                          )}
-                        </dd>
-                      </div>
-                      <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
-                        <div className="flex items-center justify-between">
-                          <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Volume
-                          </dt>
-                          <dd className="font-mono text-xs font-semibold text-cyan-100">
-                            {Math.round(selectedTrack.volume * 100)}%
-                          </dd>
-                        </div>
-                        <Slider
-                          value={[selectedTrack.volume]}
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          onValueChange={(value) => {
-                            useProjectStore
-                              .getState()
-                              .updateTrack(selectedTrack.id, {
-                                volume: value[0] ?? selectedTrack.volume,
-                              });
-                          }}
-                          aria-label={`${selectedTrack.name} volume`}
-                          className="w-full"
-                        />
-                      </div>
-                      <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
-                        <div className="flex items-center justify-between">
-                          <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Pan
-                          </dt>
-                          <dd className="font-mono text-xs font-semibold text-slate-200">
-                            {formatPanLabel(selectedTrack.pan)}
-                          </dd>
-                        </div>
-                        <Slider
-                          value={[selectedTrack.pan]}
-                          min={-1}
-                          max={1}
-                          step={0.01}
-                          onValueChange={(value) => {
-                            useProjectStore
-                              .getState()
-                              .updateTrack(selectedTrack.id, {
-                                pan: value[0] ?? selectedTrack.pan,
-                              });
-                          }}
-                          aria-label={`${selectedTrack.name} pan`}
-                          className="w-full"
-                        />
-                      </div>
-                    </dl>
-                  </div>
+                                    <Trash2 className="h-4 w-4" />
+                                    Delete
+                                  </button>
+                                  <AlertDialogContent className="max-w-md rounded-[28px] border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100 shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle className="text-xl font-semibold tracking-tight text-slate-50">
+                                        Delete{" "}
+                                        {selectedTrack?.name ?? "MIDI track"}?
+                                      </AlertDialogTitle>
+                                      <AlertDialogDescription className="text-sm leading-6 text-slate-400">
+                                        This removes the track, its clips, and
+                                        any armed recording target on it. This
+                                        action cannot be undone.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel className="rounded-2xl border-white/10 bg-white/5 text-slate-200 hover:bg-white/8 hover:text-slate-50">
+                                        Cancel
+                                      </AlertDialogCancel>
+                                      <AlertDialogAction
+                                        className="rounded-2xl bg-red-500 text-white hover:bg-red-500/90"
+                                        onClick={handleDeleteSelectedMidiTrack}
+                                      >
+                                        Delete Track
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
 
-                  <div>
-                    <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                      <div className="h-px flex-1 bg-white/10"></div>
-                      Channel Strip
-                      <div className="h-px flex-1 bg-white/10"></div>
-                    </h3>
-                    <div className="space-y-3">
-                      <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
-                        <div className="mb-3 flex items-center justify-between">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            EQ
-                          </p>
-                          <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-semibold tracking-[0.16em] text-slate-300">
-                            Preview
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          {[
-                            ["Low", "-2.0dB"],
-                            ["Mid", "+1.5dB"],
-                            ["High", "+3.0dB"],
-                          ].map(([label, value]) => (
-                            <div
-                              key={label}
-                              className="rounded-2xl border border-white/8 bg-white/5 p-3"
-                            >
-                              <div className="mb-16 h-20 rounded-xl bg-[linear-gradient(180deg,rgba(34,211,238,0.12),rgba(255,255,255,0.04))]" />
-                              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                                {label}
-                              </p>
-                              <p className="mt-1 font-mono text-[11px] text-slate-200">
-                                {value}
+                              <p
+                                className={`text-[11px] ${supportMessage ? "text-amber-200/90" : "text-slate-400"}`}
+                              >
+                                {inputHint}
                               </p>
                             </div>
-                          ))}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
-                        <div className="mb-3 flex items-center justify-between">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Inserts
-                          </p>
-                          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                            4 slots
-                          </span>
-                        </div>
-                        <div className="space-y-2">
-                          {["Channel EQ", "Compressor", "Stereo Delay", "Empty"].map((slot, slotIndex) => (
-                            <div
-                              key={`${slot}-${slotIndex}`}
-                              className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
-                            >
-                              <span className="text-xs font-medium text-slate-200">
-                                {slot}
-                              </span>
-                              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                {slot === "Empty" ? "Add" : "On"}
+                      <div>
+                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                          <div className="h-px flex-1 bg-white/10"></div>
+                          Channel Strip
+                          <div className="h-px flex-1 bg-white/10"></div>
+                        </h3>
+                        <div className="space-y-3">
+                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                EQ
+                              </p>
+                              <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-semibold tracking-[0.16em] text-slate-300">
+                                Preview
                               </span>
                             </div>
-                          ))}
-                        </div>
-                      </div>
+                            <div className="grid grid-cols-3 gap-3">
+                              {[
+                                ["Low", "-2.0dB"],
+                                ["Mid", "+1.5dB"],
+                                ["High", "+3.0dB"],
+                              ].map(([label, value]) => (
+                                <div
+                                  key={label}
+                                  className="rounded-2xl border border-white/8 bg-white/5 p-3"
+                                >
+                                  <div className="mb-16 h-20 rounded-xl bg-[linear-gradient(180deg,rgba(34,211,238,0.12),rgba(255,255,255,0.04))]" />
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                    {label}
+                                  </p>
+                                  <p className="mt-1 font-mono text-[11px] text-slate-200">
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
 
-                      <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
-                        <div className="mb-3 flex items-center justify-between">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            Sends
-                          </p>
-                          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                            2 slots
-                          </span>
-                        </div>
-                        <div className="space-y-2">
-                          {["Bus 1 Reverb", "Bus 2 Parallel Comp"].map((slot) => (
-                            <div
-                              key={slot}
-                              className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
-                            >
-                              <span className="text-xs font-medium text-slate-200">
-                                {slot}
-                              </span>
-                              <span className="font-mono text-[11px] text-cyan-100">
-                                -12.0 dB
+                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Inserts
+                              </p>
+                              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                4 slots
                               </span>
                             </div>
-                          ))}
+                            <div className="space-y-2">
+                              {[
+                                "Channel EQ",
+                                "Compressor",
+                                "Stereo Delay",
+                                "Empty",
+                              ].map((slot, slotIndex) => (
+                                <div
+                                  key={`${slot}-${slotIndex}`}
+                                  className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
+                                >
+                                  <span className="text-xs font-medium text-slate-200">
+                                    {slot}
+                                  </span>
+                                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                    {slot === "Empty" ? "Add" : "On"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Sends
+                              </p>
+                              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                2 slots
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {["Bus 1 Reverb", "Bus 2 Parallel Comp"].map(
+                                (slot) => (
+                                  <div
+                                    key={slot}
+                                    className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
+                                  >
+                                    <span className="text-xs font-medium text-slate-200">
+                                      {slot}
+                                    </span>
+                                    <span className="font-mono text-[11px] text-cyan-100">
+                                      -12.0 dB
+                                    </span>
+                                  </div>
+                                ),
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="rounded-2xl border border-amber-400/16 bg-[linear-gradient(180deg,rgba(250,204,21,0.12),rgba(217,119,6,0.08))] px-3 py-2 text-left shadow-[0_14px_28px_rgba(0,0,0,0.18)] transition-all hover:border-amber-300/30 hover:bg-amber-300/10"
+                            onClick={() => {
+                              openQwertyKeyboard();
+                            }}
+                          >
+                            <p className="text-[9px] font-black uppercase tracking-[0.28em] text-amber-200/90">
+                              QWERTY MIDI
+                            </p>
+                            <p className="mt-1 font-mono text-sm font-semibold text-amber-50">
+                              {typeof navigator !== "undefined" &&
+                              navigator.platform.toLowerCase().includes("mac")
+                                ? "⌘K"
+                                : "Ctrl+K"}
+                            </p>
+                          </button>
                         </div>
                       </div>
-                    </div>
-                  </div>
 
-                  <div>
-                    <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                      <div className="h-px flex-1 bg-white/10"></div>
-                      Clip Info
-                      <div className="h-px flex-1 bg-white/10"></div>
-                    </h3>
-                    <dl className="space-y-2">
-                      <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
-                        <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                          Notes
-                        </dt>
-                        <dd className="font-mono text-xs font-semibold text-slate-200">
-                          {selectedClip?.notes.length ?? 0}
-                        </dd>
-                      </div>
-                      <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
-                        <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                          Start
-                        </dt>
-                        <dd className="font-mono text-xs font-semibold text-slate-200">
-                          {selectedClip ? formatClock(selectedClip.startTime) : "00:00.00"}
-                        </dd>
-                      </div>
-                      <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
-                        <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                          Length
-                        </dt>
-                        <dd className="font-mono text-xs font-semibold text-slate-200">
-                          {selectedClip ? formatClock(selectedClip.duration) : "00:00.00"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </div>
-
-                  {aafImportMetadata && (
-                    <div>
-                      <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                        <div className="h-px flex-1 bg-white/10"></div>
-                        AAF Import
-                        <div className="h-px flex-1 bg-white/10"></div>
-                      </h3>
-
-                      <div className="mb-3 rounded-[20px] border border-cyan-500/20 bg-cyan-500/5 px-3 py-3 text-[11px] text-cyan-100/80">
-                        <p className="font-semibold text-cyan-100">
-                          {aafImportMetadata.summary ?? "Imported from AAF"}
-                        </p>
-                        <p className="mt-1 text-cyan-100/70">
-                          Rates: {aafImportMetadata.aafRates?.length ?? 0} •
-                          Hints: {aafImportMetadata.aafHints?.length ?? 0}
-                        </p>
-                      </div>
-
-                      {selectedAafHint ? (
+                      <div>
+                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                          <div className="h-px flex-1 bg-white/10"></div>
+                          Clip Info
+                          <div className="h-px flex-1 bg-white/10"></div>
+                        </h3>
                         <dl className="space-y-2">
-                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                            <dt className="text-xs text-slate-500">Match</dt>
-                            <dd className="text-right text-[11px] font-semibold text-slate-200">
-                              {selectedAafHint.matchedBy ?? "heuristic"}
+                          <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
+                            <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Notes
+                            </dt>
+                            <dd className="font-mono text-xs font-semibold text-slate-200">
+                              {selectedClip?.notes.length ?? 0}
                             </dd>
                           </div>
-                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                            <dt className="text-xs text-slate-500">Entry</dt>
-                            <dd className="max-w-[60%] truncate text-right text-[11px] font-semibold text-slate-200">
-                              {selectedAafHint.entryPath}
+                          <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
+                            <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Start
+                            </dt>
+                            <dd className="font-mono text-xs font-semibold text-slate-200">
+                              {selectedClip
+                                ? formatClock(selectedClip.startTime)
+                                : "00:00.00"}
                             </dd>
                           </div>
-                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                            <dt className="text-xs text-slate-500">Start</dt>
-                            <dd className="text-right text-[11px] font-semibold text-slate-200">
-                              {selectedAafHint.startTime?.toFixed(3) ?? "0.000"}
-                              s
-                              {selectedAafHint.startRawValue !== undefined && (
-                                <span className="ml-1 text-slate-500">
-                                  ({selectedAafHint.startRawValue}{" "}
-                                  {selectedAafHint.startUnit ?? "raw"})
-                                </span>
+                          <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
+                            <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Length
+                            </dt>
+                            <dd className="font-mono text-xs font-semibold text-slate-200">
+                              {selectedClip
+                                ? formatClock(selectedClip.duration)
+                                : "00:00.00"}
+                            </dd>
+                          </div>
+                        </dl>
+
+                        <div className="mt-3 flex items-center justify-between gap-3 rounded-[20px] border border-white/8 bg-black/18 px-3 py-3">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Delete Clip
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-100">
+                              {selectedTrack?.type === "midi" && selectedClip
+                                ? "Remove the selected MIDI clip"
+                                : "Select a MIDI clip to delete it"}
+                            </p>
+                          </div>
+                          <AlertDialog
+                            open={isDeleteClipDialogOpen}
+                            onOpenChange={setIsDeleteClipDialogOpen}
+                          >
+                            <button
+                              type="button"
+                              className={`flex min-w-24 items-center justify-center gap-2 rounded-2xl border px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] transition-all ${selectedTrack?.type === "midi" && selectedClip ? "border-red-400/40 bg-red-500/12 text-red-100 hover:border-red-300/60 hover:bg-red-500/18" : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
+                              onClick={() => {
+                                if (
+                                  selectedTrack?.type === "midi" &&
+                                  selectedClip
+                                ) {
+                                  setIsDeleteClipDialogOpen(true);
+                                }
+                              }}
+                              disabled={
+                                selectedTrack?.type !== "midi" || !selectedClip
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
+                            </button>
+                            <AlertDialogContent className="max-w-md rounded-[28px] border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100 shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-xl font-semibold tracking-tight text-slate-50">
+                                  Delete {selectedClip?.name ?? "MIDI clip"}?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription className="text-sm leading-6 text-slate-400">
+                                  This removes the selected MIDI clip and its
+                                  notes. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="rounded-2xl border-white/10 bg-white/5 text-slate-200 hover:bg-white/8 hover:text-slate-50">
+                                  Cancel
+                                </AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="rounded-2xl bg-red-500 text-white hover:bg-red-500/90"
+                                  onClick={handleDeleteSelectedMidiClip}
+                                >
+                                  Delete Clip
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+
+                      {aafImportMetadata && (
+                        <div>
+                          <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                            <div className="h-px flex-1 bg-white/10"></div>
+                            AAF Import
+                            <div className="h-px flex-1 bg-white/10"></div>
+                          </h3>
+
+                          <div className="mb-3 rounded-[20px] border border-cyan-500/20 bg-cyan-500/5 px-3 py-3 text-[11px] text-cyan-100/80">
+                            <p className="font-semibold text-cyan-100">
+                              {aafImportMetadata.summary ?? "Imported from AAF"}
+                            </p>
+                            <p className="mt-1 text-cyan-100/70">
+                              Rates: {aafImportMetadata.aafRates?.length ?? 0} •
+                              Hints: {aafImportMetadata.aafHints?.length ?? 0}
+                            </p>
+                          </div>
+
+                          {selectedAafHint ? (
+                            <dl className="space-y-2">
+                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                <dt className="text-xs text-slate-500">
+                                  Match
+                                </dt>
+                                <dd className="text-right text-[11px] font-semibold text-slate-200">
+                                  {selectedAafHint.matchedBy ?? "heuristic"}
+                                </dd>
+                              </div>
+                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                <dt className="text-xs text-slate-500">
+                                  Entry
+                                </dt>
+                                <dd className="max-w-[60%] truncate text-right text-[11px] font-semibold text-slate-200">
+                                  {selectedAafHint.entryPath}
+                                </dd>
+                              </div>
+                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                <dt className="text-xs text-slate-500">
+                                  Start
+                                </dt>
+                                <dd className="text-right text-[11px] font-semibold text-slate-200">
+                                  {selectedAafHint.startTime?.toFixed(3) ??
+                                    "0.000"}
+                                  s
+                                  {selectedAafHint.startRawValue !==
+                                    undefined && (
+                                    <span className="ml-1 text-slate-500">
+                                      ({selectedAafHint.startRawValue}{" "}
+                                      {selectedAafHint.startUnit ?? "raw"})
+                                    </span>
+                                  )}
+                                </dd>
+                              </div>
+                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                <dt className="text-xs text-slate-500">
+                                  Duration
+                                </dt>
+                                <dd className="text-right text-[11px] font-semibold text-slate-200">
+                                  {selectedAafHint.duration?.toFixed(3) ?? "-"}s
+                                  {selectedAafHint.durationRawValue !==
+                                    undefined && (
+                                    <span className="ml-1 text-slate-500">
+                                      ({selectedAafHint.durationRawValue}{" "}
+                                      {selectedAafHint.durationUnit ?? "raw"})
+                                    </span>
+                                  )}
+                                </dd>
+                              </div>
+                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                <dt className="text-xs text-slate-500">Rate</dt>
+                                <dd className="text-right text-[11px] font-semibold text-slate-200">
+                                  {selectedAafHint.rate
+                                    ? `${selectedAafHint.rate.toFixed(3)} ${selectedAafHint.rateKind ?? "rate"}`
+                                    : "not detected"}
+                                </dd>
+                              </div>
+                              {selectedAafHint.slotId !== undefined && (
+                                <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                  <dt className="text-xs text-slate-500">
+                                    Slot ID
+                                  </dt>
+                                  <dd className="text-right text-[11px] font-semibold text-slate-200">
+                                    {selectedAafHint.slotId}
+                                  </dd>
+                                </div>
                               )}
-                            </dd>
-                          </div>
-                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                            <dt className="text-xs text-slate-500">Duration</dt>
-                            <dd className="text-right text-[11px] font-semibold text-slate-200">
-                              {selectedAafHint.duration?.toFixed(3) ?? "-"}s
-                              {selectedAafHint.durationRawValue !==
-                                undefined && (
-                                <span className="ml-1 text-slate-500">
-                                  ({selectedAafHint.durationRawValue}{" "}
-                                  {selectedAafHint.durationUnit ?? "raw"})
-                                </span>
-                              )}
-                            </dd>
-                          </div>
-                          <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                            <dt className="text-xs text-slate-500">Rate</dt>
-                            <dd className="text-right text-[11px] font-semibold text-slate-200">
-                              {selectedAafHint.rate
-                                ? `${selectedAafHint.rate.toFixed(3)} ${selectedAafHint.rateKind ?? "rate"}`
-                                : "not detected"}
-                            </dd>
-                          </div>
-                          {selectedAafHint.slotId !== undefined && (
-                            <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
-                              <dt className="text-xs text-slate-500">
-                                Slot ID
-                              </dt>
-                              <dd className="text-right text-[11px] font-semibold text-slate-200">
-                                {selectedAafHint.slotId}
-                              </dd>
+                            </dl>
+                          ) : (
+                            <div className="rounded-lg border border-dashed border-slate-800/60 px-3 py-3 text-xs text-slate-500">
+                              No track-specific AAF hint matched the current
+                              selection.
                             </div>
                           )}
-                        </dl>
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-slate-800/60 px-3 py-3 text-xs text-slate-500">
-                          No track-specific AAF hint matched the current
-                          selection.
                         </div>
                       )}
+                    </div>
+                  ) : (
+                    <div className="mt-8 text-center text-xs text-slate-400">
+                      Select a track to inspect it.
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="mt-8 text-center text-xs text-slate-400">
-                  Select a track to inspect it.
-                </div>
-              )}
-            </div>
-          </Panel>
+              </Panel>
+            </>
+          )}
         </PanelGroup>
       </div>
 
       <div className="z-20 shrink-0 border-t border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(11,17,28,0.96),rgba(9,13,22,0.98))] shadow-[0_-10px_40px_rgba(0,0,0,0.3)]">
-        <TransportBar duration={currentProject.duration} />
+        <TransportBar
+          duration={currentProject.duration}
+          inputLabel={inputLabel}
+          inputModeLabel={inputModeLabel}
+          isRecording={isRecording}
+          onToggleRecording={handleToggleRecording}
+          recordEnabled={Boolean(armedMidiTrack) || isRecording}
+          supportMessage={inputHint}
+        />
       </div>
 
       <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
@@ -1261,6 +2004,15 @@ const ProjectPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <QwertyMidiKeyboardDialog
+        activeKeys={pressedQwertyKeys}
+        armedTrackName={armedMidiTrack?.name ?? null}
+        open={isQwertyKeyboardOpen}
+        onNoteEnd={releaseQwertyKey}
+        onNoteStart={pressQwertyKey}
+        onOpenChange={setIsQwertyKeyboardOpen}
+      />
     </div>
   );
 };

@@ -2,6 +2,12 @@ import { create } from "zustand";
 import type { TransportState } from "@/types";
 import { recordTransportFrame } from "@/utils/playbackDiagnostics";
 
+type RecordingPayload = {
+  trackId: string;
+  clipId: string;
+  startTime: number;
+};
+
 type TransportTimeListener = (time: number) => void;
 
 interface TransportStore extends TransportState {
@@ -15,6 +21,12 @@ interface TransportStore extends TransportState {
   commitCurrentTime: (time: number) => void;
   setLoopEnabled: (enabled: boolean) => void;
   setLoopPoints: (start: number, end: number) => void;
+  startRecording: (payload: RecordingPayload) => void;
+  stopRecording: () => void;
+  setActiveInput: (
+    inputMode: TransportState["inputMode"],
+    inputId: string | null,
+  ) => void;
   toggleMasterMute: () => void;
   setMasterMuted: (muted: boolean) => void;
   setMasterVolume: (volume: number) => void;
@@ -22,6 +34,12 @@ interface TransportStore extends TransportState {
 
 const initialState: TransportState = {
   isPlaying: false,
+  isRecording: false,
+  recordingTrackId: null,
+  recordingClipId: null,
+  recordingStartTime: null,
+  activeInputId: null,
+  inputMode: "qwerty",
   currentTime: 0,
   isLoopEnabled: false,
   loopStart: 0,
@@ -47,6 +65,7 @@ const writeTransportCssTime = (time: number) => {
     "--transport-current-time",
     `${time}`,
   );
+  document.documentElement.style.setProperty("--playhead-time", `${time}`);
 };
 
 const syncTransportRenderTime = (time: number) => {
@@ -161,7 +180,9 @@ export const useTransportStore = create<TransportStore>((set) => ({
     const nextTime = clampTransportTime(time);
     publishTransportTime(nextTime);
 
-    if (Math.abs(nextTime - lastCommittedTransportTime) < SNAPSHOT_COMMIT_INTERVAL) {
+    if (
+      Math.abs(nextTime - lastCommittedTransportTime) < SNAPSHOT_COMMIT_INTERVAL
+    ) {
       return;
     }
 
@@ -172,7 +193,9 @@ export const useTransportStore = create<TransportStore>((set) => ({
   commitCurrentTime: (time) => {
     const nextTime = clampTransportTime(time);
 
-    if (Math.abs(nextTime - lastCommittedTransportTime) < SNAPSHOT_COMMIT_INTERVAL) {
+    if (
+      Math.abs(nextTime - lastCommittedTransportTime) < SNAPSHOT_COMMIT_INTERVAL
+    ) {
       return;
     }
 
@@ -194,6 +217,34 @@ export const useTransportStore = create<TransportStore>((set) => ({
       loopStart: Math.max(0, Math.min(start, end)),
       loopEnd: Math.max(start, end),
       revision: state.revision + 1,
+    }));
+  },
+
+  startRecording: ({ clipId, startTime, trackId }) => {
+    set((state) => ({
+      ...state,
+      isRecording: true,
+      recordingTrackId: trackId,
+      recordingClipId: clipId,
+      recordingStartTime: startTime,
+    }));
+  },
+
+  stopRecording: () => {
+    set((state) => ({
+      ...state,
+      isRecording: false,
+      recordingTrackId: null,
+      recordingClipId: null,
+      recordingStartTime: null,
+    }));
+  },
+
+  setActiveInput: (inputMode, inputId) => {
+    set((state) => ({
+      ...state,
+      inputMode,
+      activeInputId: inputId,
     }));
   },
 

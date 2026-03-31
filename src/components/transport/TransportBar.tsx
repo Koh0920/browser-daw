@@ -21,6 +21,12 @@ import {
 
 interface TransportBarProps {
   duration: number;
+  inputLabel: string;
+  inputModeLabel: string;
+  isRecording: boolean;
+  onToggleRecording: () => void;
+  recordEnabled: boolean;
+  supportMessage?: string | null;
 }
 
 const formatTime = (time: number) => {
@@ -33,7 +39,15 @@ const formatTime = (time: number) => {
 const formatVolume = (volume: number) => `${Math.round(volume * 100)}%`;
 const DISPLAY_UPDATE_INTERVAL_MS = 50;
 
-const TransportBar = ({ duration }: TransportBarProps) => {
+const TransportBar = ({
+  duration,
+  inputLabel,
+  inputModeLabel,
+  isRecording,
+  onToggleRecording,
+  recordEnabled,
+  supportMessage,
+}: TransportBarProps) => {
   const currentTimeRef = useRef<HTMLSpanElement | null>(null);
   const progressFillRef = useRef<HTMLDivElement | null>(null);
   const transportStatsRef = useRef<HTMLSpanElement | null>(null);
@@ -135,6 +149,16 @@ const TransportBar = ({ duration }: TransportBarProps) => {
             <Play className="h-4 w-4 ml-0.5 fill-current" />
           )}
         </button>
+        <button
+          type="button"
+          className={`ml-1 flex h-10 min-w-14 items-center justify-center rounded-2xl border px-3 text-[10px] font-black uppercase tracking-[0.24em] transition-all active:scale-95 ${isRecording ? "border-rose-400/40 bg-rose-500/18 text-rose-100 shadow-[0_0_18px_rgba(244,63,94,0.28)]" : recordEnabled ? "border-white/8 bg-white/5 text-slate-300 hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-100" : "border-white/8 bg-white/5 text-slate-500 opacity-60"}`}
+          onClick={onToggleRecording}
+          title={isRecording ? "Stop recording" : "Start recording"}
+          aria-pressed={isRecording}
+          disabled={!recordEnabled && !isRecording}
+        >
+          REC
+        </button>
         <div className="mx-1 h-6 w-px bg-slate-800" />
         <button
           type="button"
@@ -148,7 +172,9 @@ const TransportBar = ({ duration }: TransportBarProps) => {
 
       <div className="flex flex-1 flex-col justify-center rounded-[24px] border border-white/8 bg-black/18 px-4 py-3">
         <div className="mb-2 flex items-center justify-between font-mono text-[11px] font-medium tracking-[0.12em] text-slate-400">
-          <span ref={currentTimeRef} className="text-cyan-100">{formatTime(initialTime)}</span>
+          <span ref={currentTimeRef} className="text-cyan-100">
+            {formatTime(initialTime)}
+          </span>
           <span>{formatTime(duration)}</span>
         </div>
         <div className="group relative h-2 w-full cursor-pointer overflow-hidden rounded-full border border-white/6 bg-black/35">
@@ -166,6 +192,9 @@ const TransportBar = ({ duration }: TransportBarProps) => {
           <span ref={transportStatsRef}>UI 0fps / jitter 0.0ms</span>
           <span ref={workerStatsRef}>Worker 0ms / jitter 0.0ms</span>
           <span ref={longTaskStatsRef}>Long tasks 0 / 0ms</span>
+          <span className={isRecording ? "text-rose-300" : "text-slate-500"}>
+            {isRecording ? "Recording live MIDI" : "Record ready"}
+          </span>
         </div>
       </div>
 
@@ -252,6 +281,27 @@ const TransportBar = ({ duration }: TransportBarProps) => {
             />
           </div>
         </div>
+      </div>
+
+      <div className="flex min-w-[240px] shrink-0 flex-col gap-2 rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,16,22,0.82),rgba(10,13,22,0.96))] px-4 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.18)]">
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+            Live Input
+          </span>
+          <span
+            className={`rounded-full px-2 py-1 font-mono text-[10px] ${inputModeLabel === "QWERTY" ? "bg-amber-400/10 text-amber-200" : "bg-cyan-400/10 text-cyan-100"}`}
+          >
+            {inputModeLabel}
+          </span>
+        </div>
+        <p className="truncate text-sm font-semibold text-slate-100">
+          {inputLabel}
+        </p>
+        <p
+          className={`min-h-[1.25rem] text-[11px] ${supportMessage ? "text-amber-200/90" : "text-slate-500"}`}
+        >
+          {supportMessage ?? "Realtime monitoring and MIDI capture are ready."}
+        </p>
       </div>
     </section>
   );

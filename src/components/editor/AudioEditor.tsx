@@ -12,9 +12,12 @@ import {
   subscribeTransportCurrentTime,
 } from "@/stores/transportStore";
 import type { AudioTrack, AudioClip } from "@/types";
+import type { GridDivision } from "@/utils/grid";
+import { getGridStepSeconds, snapTimeToGrid } from "@/utils/grid";
 
 interface AudioEditorProps {
   track: AudioTrack;
+  gridDivision?: GridDivision;
 }
 
 const AUTOSCROLL_INTERVAL_MS = 120;
@@ -23,17 +26,7 @@ const AUTOSCROLL_TRAIL_RATIO = 0.08;
 const AUTOSCROLL_TARGET_RATIO = 0.28;
 const MIN_AUTOSCROLL_DELTA_PX = 72;
 
-const snapToGrid = (time: number, bpm: number, disableSnap: boolean) => {
-  if (disableSnap) {
-    return Math.max(0, time);
-  }
-
-  const beatDuration = 60 / Math.max(bpm, 1);
-  const grid = beatDuration / 4;
-  return Math.max(0, Math.round(time / grid) * grid);
-};
-
-const AudioEditor = ({ track }: AudioEditorProps) => {
+const AudioEditor = ({ track, gridDivision = "1/16" }: AudioEditorProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -67,13 +60,16 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
   const [dragAction, setDragAction] = useState<
     "move" | "trim-start" | "trim-end" | null
   >(null);
-  const [hoverCursor, setHoverCursor] = useState<"default" | "move" | "trim">("default");
+  const [hoverCursor, setHoverCursor] = useState<"default" | "move" | "trim">(
+    "default",
+  );
 
   const duration = currentProject?.duration || 60;
   const bpm = currentProject?.bpm || 120;
   const beatDuration = 60 / Math.max(bpm, 1);
   const beatWidth = beatDuration * zoom;
   const barWidth = beatWidth * (currentProject?.timeSignatureNumerator ?? 4);
+  const gridStep = getGridStepSeconds(bpm, gridDivision);
   const canvasWidth = duration * zoom;
   const canvasHeight = 220;
 
@@ -111,7 +107,9 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
     for (let i = 0; i <= canvasWidth / beatWidth; i++) {
       const x = i * beatWidth;
       const isBar = i % (currentProject?.timeSignatureNumerator ?? 4) === 0;
-      ctx.strokeStyle = isBar ? "rgba(255, 255, 255, 0.16)" : "rgba(255, 255, 255, 0.06)";
+      ctx.strokeStyle = isBar
+        ? "rgba(255, 255, 255, 0.16)"
+        : "rgba(255, 255, 255, 0.06)";
       ctx.lineWidth = isBar ? 1.25 : 1;
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -133,7 +131,17 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
         drawAudioClip(ctx, clip, isSelected, preview);
       });
     }
-  }, [barWidth, beatWidth, canvasWidth, currentProject?.timeSignatureNumerator, dragPreview, duration, selectedClip, track.clips, zoom]);
+  }, [
+    barWidth,
+    beatWidth,
+    canvasWidth,
+    currentProject?.timeSignatureNumerator,
+    dragPreview,
+    duration,
+    selectedClip,
+    track.clips,
+    zoom,
+  ]);
 
   useEffect(() => {
     const updatePlayhead = (time: number) => {
@@ -169,13 +177,15 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
 
         if (
           autoScrollTargetRef.current === null ||
-          Math.abs(nextScrollLeft - autoScrollTargetRef.current) > MIN_AUTOSCROLL_DELTA_PX
+          Math.abs(nextScrollLeft - autoScrollTargetRef.current) >
+            MIN_AUTOSCROLL_DELTA_PX
         ) {
           autoScrollTargetRef.current = nextScrollLeft;
         }
 
         if (
-          Math.abs(scrollElement.scrollLeft - autoScrollTargetRef.current) > MIN_AUTOSCROLL_DELTA_PX
+          Math.abs(scrollElement.scrollLeft - autoScrollTargetRef.current) >
+          MIN_AUTOSCROLL_DELTA_PX
         ) {
           scrollElement.scrollLeft = autoScrollTargetRef.current;
         }
@@ -357,9 +367,10 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
     const disableSnap = e.altKey;
 
     if (dragAction === "move") {
-      const newStartTime = snapToGrid(
+      const newStartTime = snapTimeToGrid(
         Math.max(0, selectedClip.startTime + dx),
         bpm,
+        gridDivision,
         disableSnap,
       );
       setDragPreview({
@@ -369,9 +380,10 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
         trimMode: null,
       });
     } else if (dragAction === "trim-start") {
-      const newStartTime = snapToGrid(
+      const newStartTime = snapTimeToGrid(
         Math.max(0, selectedClip.startTime + dx),
         bpm,
+        gridDivision,
         disableSnap,
       );
       const newDuration = Math.max(
@@ -386,7 +398,7 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
       });
     } else if (dragAction === "trim-end") {
       const rawEnd = selectedClip.startTime + selectedClip.duration + dx;
-      const snappedEnd = snapToGrid(rawEnd, bpm, disableSnap);
+      const snappedEnd = snapTimeToGrid(rawEnd, bpm, gridDivision, disableSnap);
       const newDuration = Math.max(0.1, snappedEnd - selectedClip.startTime);
       setDragPreview({
         clipId: selectedClip.id,
@@ -440,7 +452,10 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
   };
 
   return (
-    <div className="flex h-full flex-col bg-[linear-gradient(180deg,hsl(var(--daw-surface-3)),hsl(var(--daw-surface-2)))]" ref={containerRef}>
+    <div
+      className="flex h-full flex-col bg-[linear-gradient(180deg,hsl(var(--daw-surface-3)),hsl(var(--daw-surface-2)))]"
+      ref={containerRef}
+    >
       <div className="flex items-center gap-2 border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(37,42,54,0.96),rgba(26,30,40,0.96))] p-3">
         <Button
           variant="outline"
@@ -453,11 +468,21 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
           Split at Playhead
         </Button>
 
-        <Button variant="outline" size="icon" onClick={handleZoomIn} className="rounded-xl border-white/10 bg-white/5 text-slate-100 hover:bg-white/10">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={handleZoomIn}
+          className="rounded-xl border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
+        >
           <ZoomIn className="h-4 w-4" />
         </Button>
 
-        <Button variant="outline" size="icon" onClick={handleZoomOut} className="rounded-xl border-white/10 bg-white/5 text-slate-100 hover:bg-white/10">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={handleZoomOut}
+          className="rounded-xl border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
+        >
           <ZoomOut className="h-4 w-4" />
         </Button>
 
@@ -473,9 +498,18 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
 
       <div className="border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(42,48,60,0.96),rgba(32,36,48,0.96))] px-3 py-1.5">
         <div className="relative h-6 overflow-hidden rounded-lg bg-black/20">
-          {Array.from({ length: Math.ceil(canvasWidth / beatWidth) + 1 }).map((_, index) => {
-            const x = index * beatWidth;
-            const isBar = index % (currentProject?.timeSignatureNumerator ?? 4) === 0;
+          {Array.from({
+            length: Math.ceil(canvasWidth / gridStep / zoom) + 1,
+          }).map((_, index) => {
+            const x = index * gridStep * zoom;
+            const stepsPerBar = Math.max(
+              1,
+              Math.round(
+                ((currentProject?.timeSignatureNumerator ?? 4) * beatDuration) /
+                  gridStep,
+              ),
+            );
+            const isBar = index % stepsPerBar === 0;
             return (
               <div
                 key={`audio-ruler-${index}`}
@@ -484,7 +518,7 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
               >
                 {isBar && (
                   <span className="absolute left-1.5 top-0.5 font-mono text-[10px] text-slate-300">
-                    {index / (currentProject?.timeSignatureNumerator ?? 4) + 1}
+                    {Math.floor(index / stepsPerBar) + 1}
                   </span>
                 )}
               </div>
@@ -493,7 +527,9 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
           <div
             ref={rulerPlayheadRef}
             className="pointer-events-none absolute inset-y-0 z-10 transform-gpu will-change-transform"
-            style={{ transform: `translateX(calc(var(--transport-current-time) * ${zoom}px))` }}
+            style={{
+              transform: `translateX(calc(var(--playhead-time) * ${zoom}px))`,
+            }}
           >
             <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[hsl(var(--daw-playhead))] shadow-[0_0_10px_rgba(248,113,113,0.8)]" />
           </div>
@@ -509,7 +545,9 @@ const AudioEditor = ({ track }: AudioEditorProps) => {
             <div
               ref={canvasPlayheadRef}
               className="pointer-events-none absolute inset-y-0 z-10 -translate-x-1/2 transform-gpu will-change-transform"
-              style={{ transform: `translateX(calc(var(--transport-current-time) * ${zoom}px))` }}
+              style={{
+                transform: `translateX(calc(var(--playhead-time) * ${zoom}px))`,
+              }}
             >
               <div className="absolute inset-y-0 left-1/2 w-4 -translate-x-1/2 bg-[linear-gradient(180deg,rgba(248,113,113,0.18),rgba(248,113,113,0.04))]" />
               <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.75)]" />

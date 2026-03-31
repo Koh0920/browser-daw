@@ -6,6 +6,8 @@ import {
   getTransportCurrentTime,
   subscribeTransportCurrentTime,
 } from "@/stores/transportStore";
+import type { GridDivision } from "@/utils/grid";
+import { getGridStepSeconds, snapTimeToGrid } from "@/utils/grid";
 
 const ROW_HEIGHT = 20;
 const PIANO_WIDTH = 72;
@@ -39,19 +41,23 @@ interface MidiPianoRollProps {
   clip: MidiClip | null;
   duration: number;
   bpm: number;
+  beatsPerBar?: number;
+  gridDivision?: GridDivision;
 }
-
-const snapToGrid = (time: number, bpm: number) => {
-  const beatDuration = 60 / Math.max(bpm, 1);
-  const grid = beatDuration / 4; // 16th notes
-  return Math.max(0, Math.round(time / grid) * grid);
-};
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
-const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
+const MidiPianoRoll = ({
+  track,
+  clip,
+  duration,
+  bpm,
+  beatsPerBar = 4,
+  gridDivision = "1/16",
+}: MidiPianoRollProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const gridAreaRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
     noteId: string;
     offsetX: number;
@@ -67,6 +73,13 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
   const velocityPlayheadRef = useRef<HTMLDivElement | null>(null);
   const isPlayingRef = useRef(false);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [isAddNoteModifierPressed, setIsAddNoteModifierPressed] =
+    useState(false);
+  const [splitPreview, setSplitPreview] = useState<{
+    noteId: string;
+    left: number;
+  } | null>(null);
+  const activeTool = useProjectStore((state) => state.activeTool);
   const replaceClipNotes = useProjectStore((state) => state.replaceClipNotes);
   const { isPlaying, seek } = useTransport();
 
@@ -83,7 +96,9 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
   // Calculate beat/bar spacing
   const beatDuration = 60 / Math.max(bpm, 1); // seconds per beat
   const beatWidth = beatDuration * PIXELS_PER_SECOND;
-  const barWidth = beatWidth * 4;
+  const barWidth = beatWidth * beatsPerBar;
+  const gridStep = getGridStepSeconds(bpm, gridDivision);
+  const gridStepWidth = gridStep * PIXELS_PER_SECOND;
 
   const updateNoteVelocity = (noteId: string, clientY: number) => {
     if (!track || !clip || !velocityLaneRef.current) {
@@ -105,7 +120,14 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
 
   useEffect(() => {
     setSelectedNoteId(null);
+    setSplitPreview(null);
   }, [clip?.id]);
+
+  useEffect(() => {
+    if (activeTool !== "split") {
+      setSplitPreview(null);
+    }
+  }, [activeTool]);
 
   useEffect(() => {
     // Initial scroll setup: scroll to C3 (pitch 60)
@@ -153,7 +175,8 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
       }
 
       const viewportStart = scrollElement.scrollLeft;
-      const safeStart = viewportStart + timelineViewportWidth * AUTOSCROLL_TRAIL_RATIO;
+      const safeStart =
+        viewportStart + timelineViewportWidth * AUTOSCROLL_TRAIL_RATIO;
       const safeEnd =
         viewportStart + timelineViewportWidth * (1 - AUTOSCROLL_LEAD_RATIO);
 
@@ -165,13 +188,15 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
 
         if (
           autoScrollTargetRef.current === null ||
-          Math.abs(nextScrollLeft - autoScrollTargetRef.current) > MIN_AUTOSCROLL_DELTA_PX
+          Math.abs(nextScrollLeft - autoScrollTargetRef.current) >
+            MIN_AUTOSCROLL_DELTA_PX
         ) {
           autoScrollTargetRef.current = nextScrollLeft;
         }
 
         if (
-          Math.abs(scrollElement.scrollLeft - autoScrollTargetRef.current) > MIN_AUTOSCROLL_DELTA_PX
+          Math.abs(scrollElement.scrollLeft - autoScrollTargetRef.current) >
+          MIN_AUTOSCROLL_DELTA_PX
         ) {
           scrollElement.scrollLeft = autoScrollTargetRef.current;
         }
@@ -186,6 +211,8 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      setIsAddNoteModifierPressed(event.metaKey || event.ctrlKey);
+
       // Don't intercept if user is typing in an input
       if (
         document.activeElement?.tagName === "INPUT" ||
@@ -210,12 +237,31 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
       setSelectedNoteId(null);
     };
 
+    const handleKeyUp = (event: KeyboardEvent) => {
+      setIsAddNoteModifierPressed(event.metaKey || event.ctrlKey);
+    };
+
+    const handleWindowBlur = () => {
+      setIsAddNoteModifierPressed(false);
+    };
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
   }, [clip, replaceClipNotes, selectedNoteId, track]);
 
   const handleGridClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!track || !clip || !containerRef.current) {
+      return;
+    }
+
+    if (!(event.metaKey || event.ctrlKey)) {
+      setSelectedNoteId(null);
       return;
     }
 
@@ -237,7 +283,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
     const note: MidiNote = {
       id: crypto.randomUUID(),
       pitch,
-      startTime: snapToGrid(localX / PIXELS_PER_SECOND, bpm),
+      startTime: snapTimeToGrid(localX / PIXELS_PER_SECOND, bpm, gridDivision),
       duration: beatDuration, // 1 beat default
       velocity: 96,
     };
@@ -258,22 +304,72 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
     isResizing: boolean = false,
   ) => {
     event.stopPropagation();
+    if (!track || !clip) {
+      return;
+    }
+
     const noteRect = event.currentTarget.getBoundingClientRect();
+    const targetNote = clip.notes.find((note) => note.id === noteId);
+    if (!targetNote) {
+      return;
+    }
 
     // Check if clicked near the right edge for resizing
     const clickX = event.clientX - noteRect.left;
     const resizing = clickX > noteRect.width - 8;
 
+    if (activeTool === "split") {
+      const splitOffset = snapTimeToGrid(
+        targetNote.startTime + clickX / PIXELS_PER_SECOND,
+        bpm,
+        gridDivision,
+        event.altKey,
+      );
+      const relativeSplit = splitOffset - targetNote.startTime;
+
+      if (relativeSplit <= 0 || relativeSplit >= targetNote.duration) {
+        setSelectedNoteId(noteId);
+        return;
+      }
+
+      replaceClipNotes(
+        track.id,
+        clip.id,
+        clip.notes.flatMap((note) => {
+          if (note.id !== noteId) {
+            return [note];
+          }
+
+          return [
+            {
+              ...note,
+              duration: relativeSplit,
+            },
+            {
+              ...note,
+              id: crypto.randomUUID(),
+              startTime: splitOffset,
+              duration: note.duration - relativeSplit,
+            },
+          ];
+        }),
+      );
+      setSelectedNoteId(noteId);
+      return;
+    }
+
     dragStateRef.current = {
       noteId,
       offsetX: clickX,
       offsetY: event.clientY - noteRect.top,
-      isResizing: resizing || isResizing,
+      isResizing: activeTool === "trim" ? true : resizing || isResizing,
     };
     setSelectedNoteId(noteId);
   };
 
   const handlePointerMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    setIsAddNoteModifierPressed(event.metaKey || event.ctrlKey);
+
     if (velocityDragRef.current) {
       updateNoteVelocity(velocityDragRef.current.noteId, event.clientY);
       return;
@@ -283,25 +379,25 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
       return;
     }
 
-    const gridRect = containerRef.current
-      .querySelector(".grid-area")
-      ?.getBoundingClientRect();
+    const gridRect = gridAreaRef.current?.getBoundingClientRect();
     if (!gridRect) return;
 
-    const { noteId, offsetX, isResizing } = dragStateRef.current;
+    const { noteId, offsetX, offsetY, isResizing } = dragStateRef.current;
     const localX = event.clientX - gridRect.left;
     const localY = event.clientY - gridRect.top;
 
     const targetNote = clip.notes.find((n) => n.id === noteId);
     if (!targetNote) return;
 
+    const disableSnap = event.altKey;
+
     if (isResizing) {
       // Resize horizontally only
       const rawDuration =
         (localX - targetNote.startTime * PIXELS_PER_SECOND) / PIXELS_PER_SECOND;
       const snappedDuration = Math.max(
-        beatDuration / 4,
-        Math.round(rawDuration / (beatDuration / 4)) * (beatDuration / 4),
+        gridStep,
+        snapTimeToGrid(rawDuration, bpm, gridDivision, disableSnap),
       );
 
       replaceClipNotes(
@@ -314,10 +410,21 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
     } else {
       // Move both vertically and horizontally
       const nextPitch =
-        pitches[clamp(Math.floor(localY / ROW_HEIGHT), 0, pitches.length - 1)];
+        pitches[
+          clamp(
+            Math.floor((localY - offsetY) / ROW_HEIGHT),
+            0,
+            pitches.length - 1,
+          )
+        ];
       const nextStartTime = Math.max(
         0,
-        snapToGrid((localX - offsetX) / PIXELS_PER_SECOND, bpm),
+        snapTimeToGrid(
+          (localX - offsetX) / PIXELS_PER_SECOND,
+          bpm,
+          gridDivision,
+          disableSnap,
+        ),
       );
 
       replaceClipNotes(
@@ -337,6 +444,35 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
     velocityDragRef.current = null;
   };
 
+  const handleSplitPreviewMove = (
+    event: React.MouseEvent<HTMLDivElement>,
+    note: MidiNote,
+  ) => {
+    if (activeTool !== "split") {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const splitTime = snapTimeToGrid(
+      note.startTime + localX / PIXELS_PER_SECOND,
+      bpm,
+      gridDivision,
+      event.altKey,
+    );
+    const relativeSplit = splitTime - note.startTime;
+
+    if (relativeSplit <= 0 || relativeSplit >= note.duration) {
+      setSplitPreview(null);
+      return;
+    }
+
+    setSplitPreview({
+      noteId: note.id,
+      left: splitTime * PIXELS_PER_SECOND,
+    });
+  };
+
   // Render timeline ruler marks
   const renderRulerMarks = () => {
     const marks = [];
@@ -346,7 +482,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
 
     for (let i = 0; i <= totalBeats; i++) {
       const xPos = i * beatWidth;
-      const isBar = i % 4 === 0;
+      const isBar = i % beatsPerBar === 0;
 
       marks.push(
         <div
@@ -361,7 +497,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
         >
           {isBar && (
             <span className="absolute left-1.5 top-1 text-[10px] font-semibold text-slate-400 select-none">
-              {i / 4 + 1}
+              {Math.floor(i / beatsPerBar) + 1}
             </span>
           )}
         </div>,
@@ -375,9 +511,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
       {/* Header */}
       <div className="relative z-30 flex shrink-0 items-center justify-between border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(37,42,54,0.96),rgba(26,30,40,0.96))] px-4 py-2 shadow-sm">
         <div className="flex items-center gap-3">
-          <h2 className="daw-panel-title text-slate-300">
-            Piano Roll
-          </h2>
+          <h2 className="daw-panel-title text-slate-300">Piano Roll</h2>
           <div className="h-4 w-px bg-white/10"></div>
           <p className="text-xs font-semibold text-slate-100">
             {track?.name || "No track selected"}
@@ -385,7 +519,9 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
         </div>
         {clip && (
           <span className="rounded-full bg-white/6 px-3 py-1 font-mono text-[10px] font-medium tracking-[0.08em] text-slate-300">
-            Click to add. Drag to move, trim, and set velocity.
+            {activeTool === "split"
+              ? "Split tool: click a note to cut it at the pointer."
+              : "Cmd/Ctrl+click to add. Drag to move, trim, and set velocity."}
           </span>
         )}
       </div>
@@ -413,7 +549,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
             className="relative"
           >
             {/* Top-Left Corner (Sticky) */}
-            <div className="sticky left-0 top-0 z-40 h-[28px] w-[72px] border-b border-r border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(42,48,60,0.96),rgba(31,37,50,0.96))] shadow-sm backdrop-blur-md" />
+            <div className="pointer-events-none absolute left-0 top-0 z-40 h-[28px] w-[72px] border-b border-r border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(42,48,60,0.96),rgba(31,37,50,0.96))] shadow-sm backdrop-blur-md" />
 
             {/* Timeline Ruler (Sticky Top) */}
             <div
@@ -440,7 +576,9 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                 <div
                   ref={rulerPlayheadRef}
                   className="pointer-events-none absolute top-0 bottom-0 left-0 z-20 transform-gpu will-change-transform"
-                  style={{ transform: `translateX(calc(var(--transport-current-time) * ${PIXELS_PER_SECOND}px))` }}
+                  style={{
+                    transform: `translateX(calc(var(--playhead-time) * ${PIXELS_PER_SECOND}px))`,
+                  }}
                 >
                   <div className="absolute inset-y-0 left-1/2 w-4 -translate-x-1/2 bg-[linear-gradient(180deg,rgba(248,113,113,0.22),rgba(248,113,113,0.06))] blur-[1px]" />
                   <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[hsl(var(--daw-playhead))] shadow-[0_0_12px_rgba(248,113,113,0.8)]" />
@@ -460,46 +598,55 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
             {/* Left Keyboard (Sticky Left) */}
             <div
               className="sticky left-0 z-20 w-[72px] overflow-hidden border-r border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,#dbe4ef,#cbd7e4)] shadow-[3px_0_15px_rgba(0,0,0,0.5)]"
-              style={{ top: RULER_HEIGHT, height: canvasHeight }}
+              style={{ height: canvasHeight }}
             >
               <div className="relative h-full w-full">
                 {pitches.map((pitch, i) => {
-                  const isBlackKey = NOTE_NAMES[pitch % 12].includes("#");
-                  const isC = NOTE_NAMES[pitch % 12] === "C";
+                  const noteName = NOTE_NAMES[pitch % 12];
+                  const isBlackKey = noteName.includes("#");
+                  const isC = noteName === "C";
                   const top = i * ROW_HEIGHT;
 
-                  if (isBlackKey) {
-                    return (
-                      <button
-                        key={pitch}
-                        type="button"
-                        className="absolute left-0 z-10 w-[44px] rounded-r-[3px] border-y border-r border-[#0F131A] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-700 pr-2 text-right text-[9px] font-bold text-slate-400 shadow-[0_3px_5px_rgba(0,0,0,0.6)] transition-all hover:brightness-125 focus:brightness-125"
-                        style={{ top: `${top}px`, height: `${ROW_HEIGHT}px` }}
-                        onClick={() => seek(getTransportCurrentTime())}
-                      >
-                        {NOTE_NAMES[pitch % 12]}
-                      </button>
-                    );
-                  } else {
-                    return (
-                      <button
-                        key={pitch}
-                        type="button"
-                        className={`absolute left-0 flex w-full items-center justify-end border-b pr-2 text-[10px] font-bold shadow-inner transition-all hover:brightness-95 focus:brightness-95 ${isC ? "border-[#9bb7d8] bg-[#dce9f8] text-slate-700" : "border-[#CBD5E1] bg-slate-200 text-slate-500"}`}
-                        style={{ top: `${top}px`, height: `${ROW_HEIGHT}px` }}
-                        onClick={() => seek(getTransportCurrentTime())}
-                      >
-                        {NOTE_NAMES[pitch % 12]}
+                  return (
+                    <button
+                      key={pitch}
+                      type="button"
+                      className={`absolute left-0 flex box-border w-full items-center justify-between border-b px-2 text-[10px] font-bold transition-all focus:brightness-105 hover:brightness-105 ${
+                        isBlackKey
+                          ? "border-[#0F131A] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-800 text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                          : isC
+                            ? "border-[#9bb7d8] bg-[#dce9f8] text-slate-700 shadow-inner"
+                            : "border-[#CBD5E1] bg-slate-200 text-slate-500 shadow-inner"
+                      }`}
+                      style={{ top: `${top}px`, height: `${ROW_HEIGHT}px` }}
+                      onClick={() => seek(getTransportCurrentTime())}
+                    >
+                      <span className="font-mono text-[9px] tracking-[0.08em] opacity-70">
                         {Math.floor(pitch / 12) - 1}
-                      </button>
-                    );
-                  }
+                      </span>
+                      <span className="flex items-center gap-1">
+                        {isBlackKey && (
+                          <span className="h-2.5 w-1 rounded-full bg-white/15" />
+                        )}
+                        <span>{noteName}</span>
+                      </span>
+                    </button>
+                  );
                 })}
               </div>
             </div>
 
             <div
-              className="absolute"
+              ref={gridAreaRef}
+              className={`absolute ${
+                activeTool === "split"
+                  ? "cursor-cell"
+                  : isAddNoteModifierPressed
+                    ? "cursor-copy"
+                    : activeTool === "trim"
+                      ? "cursor-col-resize"
+                      : "cursor-default"
+              }`}
               style={{
                 left: PIANO_WIDTH,
                 top: RULER_HEIGHT,
@@ -507,6 +654,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                 height: canvasHeight,
               }}
               onClick={handleGridClick}
+              onMouseLeave={() => setSplitPreview(null)}
             >
               {/* Horizontal Pitch Backgrounds */}
               {pitches.map((pitch, i) => {
@@ -515,7 +663,7 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                 return (
                   <div
                     key={`bg-${pitch}`}
-                    className={`absolute w-full border-b ${isBlackKey ? "bg-[#101318] border-transparent" : "bg-[#1A1D24] border-[#232b38]"}`}
+                    className={`absolute box-border w-full border-b ${isBlackKey ? "bg-[#101318] border-transparent" : "bg-[#1A1D24] border-[#232b38]"}`}
                     style={{
                       top: i * ROW_HEIGHT,
                       height: ROW_HEIGHT,
@@ -552,10 +700,16 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                 return (
                   <div
                     key={note.id}
-                    className={`absolute cursor-move select-none rounded-[3px] border text-left text-[9px] font-bold shadow-[0_2px_6px_rgba(0,0,0,0.5)] transition-all ${
+                    className={`absolute select-none rounded-[3px] border text-left text-[9px] font-bold shadow-[0_2px_6px_rgba(0,0,0,0.5)] transition-all ${
                       isSelected
                         ? "z-10 border-cyan-100 bg-gradient-to-b from-cyan-300 to-cyan-500 text-white shadow-[0_0_12px_rgba(34,211,238,0.5)] ring-1 ring-cyan-200/70"
                         : "border-cyan-500/60 bg-gradient-to-b from-[#22d3ee] to-[#0891b2] text-cyan-50 hover:brightness-110 active:scale-[0.98]"
+                    } ${
+                      activeTool === "split"
+                        ? "cursor-cell"
+                        : activeTool === "trim"
+                          ? "cursor-col-resize"
+                          : "cursor-move"
                     }`}
                     style={{
                       left: `${note.startTime * PIXELS_PER_SECOND}px`,
@@ -564,7 +718,31 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                       height: `${ROW_HEIGHT - 2}px`,
                     }}
                     onMouseDown={(event) => handleNoteMouseDown(event, note.id)}
+                    onMouseMove={(event) => handleSplitPreviewMove(event, note)}
+                    onMouseLeave={() => {
+                      if (splitPreview?.noteId === note.id) {
+                        setSplitPreview(null);
+                      }
+                    }}
+                    onClick={(event) => event.stopPropagation()}
                   >
+                    {activeTool === "split" &&
+                      splitPreview?.noteId === note.id && (
+                        <>
+                          <div
+                            className="pointer-events-none absolute bottom-[-2px] top-[-2px] z-20 w-px bg-white/95 shadow-[0_0_10px_rgba(255,255,255,0.65)]"
+                            style={{
+                              left: `${splitPreview.left - note.startTime * PIXELS_PER_SECOND}px`,
+                            }}
+                          />
+                          <div
+                            className="pointer-events-none absolute top-[-8px] z-20 h-0 w-0 border-x-[5px] border-t-0 border-b-[7px] border-x-transparent border-b-white/90 drop-shadow-[0_0_6px_rgba(255,255,255,0.45)]"
+                            style={{
+                              left: `${splitPreview.left - note.startTime * PIXELS_PER_SECOND - 5}px`,
+                            }}
+                          />
+                        </>
+                      )}
                     {/* Left highlight strip indicating velocity/attack */}
                     <div
                       className="pointer-events-none absolute bottom-0 left-0 top-0 w-1 rounded-l-[2px] bg-white/50"
@@ -578,8 +756,11 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
 
                     {/* Right edge resize handle overlay */}
                     <div
-                      className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/20 transition-colors rounded-r-[2px]"
-                      onMouseDown={(e) => handleNoteMouseDown(e, note.id, true)}
+                      className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize rounded-r-[2px] transition-colors hover:bg-white/20"
+                      onMouseDown={(event) =>
+                        handleNoteMouseDown(event, note.id, true)
+                      }
+                      onClick={(event) => event.stopPropagation()}
                     />
                   </div>
                 );
@@ -589,7 +770,9 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
               <div
                 ref={gridPlayheadRef}
                 className="pointer-events-none absolute bottom-0 top-0 left-0 z-20 transform-gpu will-change-transform"
-                style={{ transform: `translateX(calc(var(--transport-current-time) * ${PIXELS_PER_SECOND}px))` }}
+                style={{
+                  transform: `translateX(calc(var(--playhead-time) * ${PIXELS_PER_SECOND}px))`,
+                }}
               >
                 <div className="absolute inset-y-0 -left-2 w-4 bg-[linear-gradient(180deg,rgba(248,113,113,0.18),rgba(248,113,113,0.04))]" />
                 <div className="absolute inset-y-0 left-0 w-px bg-[hsl(var(--daw-playhead))] shadow-[0_0_10px_rgba(248,113,113,0.8)]" />
@@ -609,7 +792,8 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                 </p>
                 <p className="font-mono text-[10px] text-slate-500">
                   {selectedNoteId
-                    ? clip.notes.find((note) => note.id === selectedNoteId)?.velocity ?? 0
+                    ? (clip.notes.find((note) => note.id === selectedNoteId)
+                        ?.velocity ?? 0)
                     : "--"}
                 </p>
               </div>
@@ -629,14 +813,20 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
                 className="pointer-events-none absolute inset-0 opacity-35"
                 style={{
                   backgroundImage: `linear-gradient(to right, rgba(255,255,255,0.12) 1px, transparent 1px), linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(to top, rgba(255,255,255,0.05) 1px, transparent 1px)`,
-                  backgroundSize: `${barWidth}px 100%, ${beatWidth}px 100%, 100% 24px`,
+                  backgroundSize: `${barWidth}px 100%, ${gridStepWidth}px 100%, 100% 24px`,
                 }}
               />
               {clip.notes.map((note) => {
                 const left = note.startTime * PIXELS_PER_SECOND;
-                const width = Math.max(8, note.duration * PIXELS_PER_SECOND - 2);
+                const width = Math.max(
+                  8,
+                  note.duration * PIXELS_PER_SECOND - 2,
+                );
                 const isSelected = selectedNoteId === note.id;
-                const barHeight = Math.max(10, (note.velocity / 127) * (VELOCITY_HEIGHT - 14));
+                const barHeight = Math.max(
+                  10,
+                  (note.velocity / 127) * (VELOCITY_HEIGHT - 14),
+                );
 
                 return (
                   <button
@@ -661,9 +851,33 @@ const MidiPianoRoll = ({ track, clip, duration, bpm }: MidiPianoRollProps) => {
               <div
                 ref={velocityPlayheadRef}
                 className="pointer-events-none absolute inset-y-0 left-0 z-20 transform-gpu will-change-transform"
-                style={{ transform: `translateX(calc(var(--transport-current-time) * ${PIXELS_PER_SECOND}px))` }}
+                style={{
+                  transform: `translateX(calc(var(--playhead-time) * ${PIXELS_PER_SECOND}px))`,
+                }}
               >
                 <div className="absolute inset-y-0 left-0 w-px bg-[hsl(var(--daw-playhead))] shadow-[0_0_10px_rgba(248,113,113,0.8)]" />
+              </div>
+            </div>
+
+            <div
+              className={`pointer-events-none absolute inset-0 z-40 ${
+                isAddNoteModifierPressed && activeTool !== "split"
+                  ? "opacity-100"
+                  : "opacity-0"
+              }`}
+              aria-hidden="true"
+            >
+              <div
+                className="absolute rounded-full border border-cyan-200/70 bg-cyan-300/15 shadow-[0_0_24px_rgba(34,211,238,0.22)]"
+                style={{
+                  left: PIANO_WIDTH + 12,
+                  top: RULER_HEIGHT + 12,
+                  width: 22,
+                  height: 22,
+                }}
+              >
+                <div className="absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-cyan-100" />
+                <div className="absolute left-1/2 top-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 bg-cyan-100" />
               </div>
             </div>
           </div>

@@ -14,6 +14,20 @@ export interface MidiNote {
   velocity: number;
 }
 
+export type LiveInputMode = "web-midi" | "qwerty";
+
+export interface LiveMidiMessage {
+  type: "noteon" | "noteoff";
+  pitch: number;
+  velocity: number;
+  channel: number;
+  sourceId: string;
+  timestamp: number;
+  inputMode: LiveInputMode;
+}
+
+export type ProjectTool = "pointer" | "split" | "trim";
+
 export interface MidiClip {
   id: string;
   name: string;
@@ -44,10 +58,12 @@ export interface ProjectTrack {
   pan: number;
   muted: boolean;
   solo: boolean;
+  recordArmed?: boolean;
   instrument: InstrumentConfig;
 }
 
 export type AudioTrack = ProjectTrack;
+export type MidiTrack = ProjectTrack;
 
 export interface AafImportRateInfo {
   entryPath: string;
@@ -111,6 +127,12 @@ export interface ImportedMidiProject {
 
 export interface TransportState {
   isPlaying: boolean;
+  isRecording: boolean;
+  recordingTrackId: string | null;
+  recordingClipId: string | null;
+  recordingStartTime: number | null;
+  activeInputId: string | null;
+  inputMode: LiveInputMode;
   currentTime: number;
   isLoopEnabled: boolean;
   loopStart: number;
