@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type ReactNode,
+} from "react";
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -163,27 +171,32 @@ const HeaderPanelGlyph = ({ panel }: { panel: "editor" | "inspector" }) => (
   </svg>
 );
 
-const HeaderActionButton = ({
-  active = false,
-  children,
-  label,
-  onClick,
-}: {
-  active?: boolean;
-  children: ReactNode;
-  label: string;
-  onClick?: () => void;
-}) => (
-  <button
-    type="button"
-    className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition-all active:scale-95 ${active ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100" : "border-white/8 bg-white/5 text-slate-300 hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100"}`}
-    aria-label={label}
-    title={label}
-    onClick={onClick}
-  >
-    {children}
-  </button>
+const HeaderActionButton = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    active?: boolean;
+    children: ReactNode;
+    label: string;
+  }
+>(
+  (
+    { active = false, children, label, className, type = "button", ...props },
+    ref,
+  ) => (
+    <button
+      ref={ref}
+      type={type}
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition-all active:scale-95 ${active ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100" : "border-white/8 bg-white/5 text-slate-300 hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100"}${className ? ` ${className}` : ""}`}
+      aria-label={label}
+      title={label}
+      {...props}
+    >
+      {children}
+    </button>
+  ),
 );
+
+HeaderActionButton.displayName = "HeaderActionButton";
 
 const formatPanLabel = (pan: number) => {
   if (pan > 0) {
@@ -214,6 +227,44 @@ const formatBarsBeats = (time: number, bpm: number, beatsPerBar: number) => {
   return `${bar}.${beat}.${sixteenth}`;
 };
 
+const MIDI_FILE_PATTERN = /\.(mid|midi)$/i;
+
+const isMidiAsset = (file: File) => {
+  const mimeType = file.type.toLowerCase();
+
+  return (
+    MIDI_FILE_PATTERN.test(file.name) ||
+    mimeType === "audio/midi" ||
+    mimeType === "audio/x-midi" ||
+    mimeType === "application/midi" ||
+    mimeType === "application/x-midi"
+  );
+};
+
+const isAudioAsset = (file: File) =>
+  !isMidiAsset(file) && file.type.toLowerCase().startsWith("audio/");
+
+const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
+  Array.from(dataTransfer?.types ?? []).includes("Files");
+
+const openFilePicker = (input: HTMLInputElement | null) => {
+  if (!input) {
+    return;
+  }
+
+  try {
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+      return;
+    }
+
+    input.focus({ preventScroll: true });
+    input.click();
+  } catch {
+    input.click();
+  }
+};
+
 const ProjectPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -232,11 +283,14 @@ const ProjectPage = () => {
   const recordingStartTimeRef = useRef<number | null>(null);
   const recordingTrackIdRef = useRef<string | null>(null);
   const selectedTrackRef = useRef<ProjectTrack | null>(null);
+  const fileDragDepthRef = useRef(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [isDeleteClipDialogOpen, setIsDeleteClipDialogOpen] = useState(false);
   const [isDeleteTrackDialogOpen, setIsDeleteTrackDialogOpen] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [isQwertyKeyboardOpen, setIsQwertyKeyboardOpen] = useState(false);
   const [exportTarget, setExportTarget] = useState<ExportTarget>("master");
   const [useLoopRangeForExport, setUseLoopRangeForExport] = useState(false);
@@ -761,65 +815,158 @@ const ProjectPage = () => {
     }
   };
 
-  const handleImportMidi = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = event.target.files?.[0];
-    if (!file) {
+  const importMidiAsset = async (file: File) => {
+    await importMidiFile(file);
+  };
+
+  const importAudioAsset = async (file: File) => {
+    const project = currentProjectRef.current;
+    if (!project) {
+      throw new Error("Project is not loaded");
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const targetTrackId =
+      selectedTrackRef.current?.type === "audio"
+        ? selectedTrackRef.current.id
+        : addAudioTrack(file.name.replace(/\.[^.]+$/, ""));
+
+    if (!targetTrackId) {
+      throw new Error("Audio track could not be created");
+    }
+
+    await addAudioClip(targetTrackId, {
+      name: file.name,
+      startTime: 0,
+      audioData: arrayBuffer,
+      audioFileName: file.name,
+      audioMimeType: file.type,
+    });
+  };
+
+  const importFiles = async (files: File[]) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    const supportedFiles = files.filter(
+      (file) => isMidiAsset(file) || isAudioAsset(file),
+    );
+    const skippedCount = files.length - supportedFiles.length;
+
+    if (supportedFiles.length === 0) {
+      setStatusMessage("No supported MIDI or audio files were selected.");
       return;
     }
 
     setIsBusy(true);
-    setStatusMessage(`Importing ${file.name}...`);
-    try {
-      await importMidiFile(file);
-      setStatusMessage(`${file.name} imported successfully.`);
-    } catch (error) {
-      console.error(error);
-      setStatusMessage("MIDI import failed.");
-    } finally {
-      setIsBusy(false);
-      event.target.value = "";
+
+    const importedNames: string[] = [];
+    const failedNames: string[] = [];
+
+    for (const file of supportedFiles) {
+      setStatusMessage(`Importing ${file.name}...`);
+
+      try {
+        if (isMidiAsset(file)) {
+          await importMidiAsset(file);
+        } else {
+          await importAudioAsset(file);
+        }
+
+        importedNames.push(file.name);
+      } catch (error) {
+        console.error(error);
+        failedNames.push(file.name);
+      }
     }
+
+    setIsBusy(false);
+
+    if (
+      failedNames.length === 0 &&
+      skippedCount === 0 &&
+      importedNames.length === 1
+    ) {
+      setStatusMessage(`${importedNames[0]} imported successfully.`);
+      return;
+    }
+
+    const summary = [
+      importedNames.length > 0
+        ? `Imported ${importedNames.length} file${importedNames.length === 1 ? "" : "s"}`
+        : null,
+      failedNames.length > 0 ? `${failedNames.length} failed` : null,
+      skippedCount > 0 ? `${skippedCount} unsupported` : null,
+    ]
+      .filter(Boolean)
+      .join(". ");
+
+    setStatusMessage(summary || "Import finished.");
+  };
+
+  const handleImportMidi = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    await importFiles(Array.from(event.target.files ?? []));
+    event.target.value = "";
   };
 
   const handleImportAudio = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const file = event.target.files?.[0];
-    if (!file || !currentProject) {
+    await importFiles(Array.from(event.target.files ?? []));
+    event.target.value = "";
+  };
+
+  const handleFileDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) {
       return;
     }
 
-    setIsBusy(true);
-    setStatusMessage(`Importing ${file.name}...`);
+    event.preventDefault();
+    event.stopPropagation();
+    fileDragDepthRef.current += 1;
+    setIsFileDragActive(true);
+  };
 
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const targetTrackId =
-        selectedTrack?.type === "audio"
-          ? selectedTrack.id
-          : addAudioTrack(file.name.replace(/\.[^.]+$/, ""));
-
-      if (!targetTrackId) {
-        throw new Error("Audio track could not be created");
-      }
-
-      await addAudioClip(targetTrackId, {
-        name: file.name,
-        startTime: 0,
-        audioData: arrayBuffer,
-        audioFileName: file.name,
-        audioMimeType: file.type,
-      });
-      setStatusMessage(`${file.name} imported successfully.`);
-    } catch (error) {
-      console.error(error);
-      setStatusMessage("Audio import failed.");
-    } finally {
-      setIsBusy(false);
-      event.target.value = "";
+  const handleFileDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
     }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    if (!isFileDragActive) {
+      setIsFileDragActive(true);
+    }
+  };
+
+  const handleFileDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+
+    if (fileDragDepthRef.current === 0) {
+      setIsFileDragActive(false);
+    }
+  };
+
+  const handleFileDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    fileDragDepthRef.current = 0;
+    setIsFileDragActive(false);
+    await importFiles(Array.from(event.dataTransfer.files));
   };
 
   const handleExport = async () => {
@@ -897,7 +1044,13 @@ const ProjectPage = () => {
   const initialTransportTime = getTransportCurrentTime();
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-daw-surface0 font-body text-slate-100 selection:bg-cyan-500/30">
+    <div
+      className="relative flex h-screen w-screen flex-col overflow-hidden bg-daw-surface0 font-body text-slate-100 selection:bg-cyan-500/30"
+      onDragEnter={handleFileDragEnter}
+      onDragOver={handleFileDragOver}
+      onDragLeave={handleFileDragLeave}
+      onDrop={handleFileDrop}
+    >
       <header className="z-10 grid min-h-[88px] shrink-0 grid-cols-[minmax(260px,1fr)_minmax(360px,560px)_minmax(280px,1fr)] items-center gap-4 border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(17,22,34,0.96),rgba(9,12,20,0.94))] px-4 py-3 backdrop-blur-md">
         <div className="flex min-w-0 items-center gap-4">
           <Link
@@ -1042,7 +1195,10 @@ const ProjectPage = () => {
               </span>
             )}
 
-            <DropdownMenu>
+            <DropdownMenu
+              open={isImportMenuOpen}
+              onOpenChange={setIsImportMenuOpen}
+            >
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
@@ -1089,13 +1245,21 @@ const ProjectPage = () => {
               >
                 <DropdownMenuItem
                   className="rounded-xl focus:bg-white/8"
-                  onClick={() => midiFileInputRef.current?.click()}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    openFilePicker(midiFileInputRef.current);
+                    setIsImportMenuOpen(false);
+                  }}
                 >
                   Import MIDI
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="rounded-xl focus:bg-white/8"
-                  onClick={() => audioFileInputRef.current?.click()}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    openFilePicker(audioFileInputRef.current);
+                    setIsImportMenuOpen(false);
+                  }}
                 >
                   Import audio
                 </DropdownMenuItem>
@@ -1169,19 +1333,38 @@ const ProjectPage = () => {
               ref={midiFileInputRef}
               type="file"
               accept=".mid,.midi,audio/midi"
-              className="hidden"
+              className="sr-only"
               onChange={handleImportMidi}
             />
             <input
               ref={audioFileInputRef}
               type="file"
               accept="audio/*"
-              className="hidden"
+              className="sr-only"
               onChange={handleImportAudio}
             />
           </div>
         </TooltipProvider>
       </header>
+
+      <div
+        className={`pointer-events-none absolute inset-0 z-40 flex items-center justify-center transition-opacity duration-150 ${isFileDragActive ? "opacity-100" : "opacity-0"}`}
+        aria-hidden="true"
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.14),rgba(2,6,23,0.84)_58%)] backdrop-blur-[2px]" />
+        <div className="relative rounded-[32px] border border-cyan-300/35 bg-[linear-gradient(180deg,rgba(8,145,178,0.16),rgba(15,23,42,0.9))] px-10 py-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
+          <p className="text-[11px] font-black uppercase tracking-[0.28em] text-cyan-200/90">
+            Import Files
+          </p>
+          <p className="mt-3 font-display text-2xl font-semibold tracking-[-0.03em] text-slate-50">
+            Drop MIDI or audio files here
+          </p>
+          <p className="mt-2 text-sm font-medium text-slate-300">
+            MIDI creates instrument clips. Audio lands on the selected audio
+            track or creates a new one.
+          </p>
+        </div>
+      </div>
 
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal">
