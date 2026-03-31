@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Browser DAW icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#102336" />
+      <stop offset="100%" stop-color="#0b0f17" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#67e8f9" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)" />
+  <rect x="10" y="14" width="44" height="36" rx="10" fill="#121826" stroke="#25344a" stroke-width="2" />
+  <rect x="14" y="18" width="36" height="24" rx="6" fill="#0a0f18" />
+  <path d="M18 36h5V24h-5zm7 0h5V20h-5zm7 0h5V27h-5zm7 0h5V22h-5z" fill="url(#accent)" />
+  <rect x="14" y="46" width="36" height="4" rx="2" fill="#1f2937" />
+  <circle cx="54" cy="46" r="4" fill="#67e8f9" opacity="0.9" />
+</svg>
