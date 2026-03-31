@@ -1,5 +1,3 @@
-"use client"
-
 import { useCallback } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import type { Project } from "@/types"

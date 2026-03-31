@@ -83,12 +83,12 @@ const AudioTrack = ({ track, readOnly = false }: AudioTrackProps) => {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             <span className="text-xs">M</span>
-            <Switch checked={track.muted} onCheckedChange={handleMuteToggle} size="sm" disabled={readOnly} />
+            <Switch checked={track.muted} onCheckedChange={handleMuteToggle} disabled={readOnly} />
           </div>
 
           <div className="flex items-center gap-1">
             <span className="text-xs">S</span>
-            <Switch checked={track.solo} onCheckedChange={handleSoloToggle} size="sm" disabled={readOnly} />
+            <Switch checked={track.solo} onCheckedChange={handleSoloToggle} disabled={readOnly} />
           </div>
 
           <Volume2 className="h-4 w-4 text-muted-foreground" />

@@ -1,80 +1,101 @@
-# 🎹 Browser DAW
+# Browser DAW
 
-A browser-based Digital Audio Workstation (DAW) built with React, TypeScript, and the Web Audio API. Create, edit, and play back music projects entirely in your browser — no installation required.
+A browser-based Digital Audio Workstation built with React, TypeScript, and the Web Audio API. The current target is a browser-first prototype that can create, import, edit, play back, export, and locally persist projects end to end.
 
-## ✨ Features
+## Status
 
-- **Multi-track sequencer** — Arrange audio and MIDI clips on a timeline
-- **MIDI editor** — Create and edit MIDI clips with a piano-roll interface
-- **Web Audio engine** — Low-latency playback powered by the Web Audio API
-- **Project management** — Save, load, and import projects (supports `.aaf` and other formats)
-- **PWA support** — Installable as a Progressive Web App for offline use
-- **Modern UI** — Built with Radix UI components and Tailwind CSS
+### Done
 
-## 🚀 Getting Started
+- Project creation and local persistence
+- MIDI / AAF / DAWPROJECT import
+- Arrangement / Piano Roll / Audio editor workflows
+- Web Audio based playback and live MIDI input
+- Export to master / stems / DAWPROJECT
+- Local audio asset storage with Dexie + OPFS
+
+### Prototype
+
+- The audio engine is functional but still evolving. Scheduler and voice-planning responsibilities are separated, but more cleanup is expected.
+- The share flow is still being rebuilt. SharedProjectPage remains a provisional UI.
+- Browsers without OPFS support fall back to IndexedDB-backed audio persistence.
+
+### Planned
+
+- Reintroduce installable PWA and offline caching
+- Redesign project sharing flow
+- Expand store / utility test coverage
+
+## Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18+
-- [pnpm](https://pnpm.io/) (recommended)
+- Node.js 18+
+- pnpm
 
-### Installation
+### Development
 
 ```bash
-# Clone the repository
 git clone https://github.com/Koh0920/browser-daw.git
 cd browser-daw
-
-# Install dependencies
 pnpm install
-
-# Start the development server
 pnpm dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+Open http://localhost:5173 in your browser.
 
-### Build for Production
+### Production Build
 
 ```bash
 pnpm build
-pnpm start   # preview the production build
+pnpm preview
 ```
 
-## 🗂 Project Structure
+## Quality Gates
 
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test
 ```
+
+## Project Structure
+
+```text
 browser-daw/
-├── public/          # Static assets & PWA icons
+├── public/
+├── scripts/
 ├── src/
-│   ├── audio/       # Web Audio engine & scheduling logic
-│   ├── components/  # Reusable UI components
-│   ├── hooks/       # Custom React hooks
-│   ├── lib/         # Utility libraries
-│   ├── pages/       # Page-level components
-│   ├── stores/      # Zustand state management
-│   ├── styles/      # Global styles
-│   ├── types/       # TypeScript type definitions
-│   └── utils/       # Helper utilities
+│   ├── audio/
+│   ├── components/
+│   ├── hooks/
+│   ├── pages/
+│   ├── projects/
+│   ├── stores/
+│   ├── styles/
+│   ├── types/
+│   └── utils/
 ├── index.html
 ├── package.json
-├── vite.config.ts
-└── tailwind.config.ts
+└── vite.config.ts
 ```
 
-## 🛠 Tech Stack
+## Tech Stack
 
 | Category | Technology |
-|---|---|
+| --- | --- |
 | Framework | React 19 + TypeScript |
 | Build tool | Vite |
 | Styling | Tailwind CSS + Radix UI |
 | State management | Zustand + Immer |
 | Audio | Web Audio API |
 | MIDI | @tonejs/midi |
-| Storage | Dexie (IndexedDB) |
-| PWA | vite-plugin-pwa |
+| Storage | Dexie + OPFS fallback |
 
-## 📄 License
+## Notes
 
-MIT © [Koh0920](https://github.com/Koh0920)
+- The supported runtime is Vite. There is no active Next.js setup in this repository.
+- public/manifest.json is currently a placeholder asset for a future PWA reintroduction and is not wired into an install flow yet.
+
+## License
+
+MIT © Koh0920

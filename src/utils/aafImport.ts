@@ -891,10 +891,10 @@ export const importAafFile = async (
           clips: [
             {
               id: createId(),
+              clipType: "audio",
               name: trackName || `Clip ${index + 1}`,
               startTime,
               duration: clipDuration,
-              notes: [],
               audioData: arrayBufferView,
               audioFileName,
               audioMimeType,

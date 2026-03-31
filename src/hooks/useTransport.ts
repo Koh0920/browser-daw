@@ -1,4 +1,3 @@
-import { useProjectStore } from "@/stores/projectStore";
 import { useTransportStore } from "@/stores/transportStore";
 
 export const useTransportCurrentTime = () =>
@@ -7,7 +6,6 @@ export const useTransportCurrentTime = () =>
 export const useTransport = () => {
   const activeInputId = useTransportStore((state) => state.activeInputId);
   const inputMode = useTransportStore((state) => state.inputMode);
-  useProjectStore((state) => state.currentProject);
   const isLoopEnabled = useTransportStore((state) => state.isLoopEnabled);
   const isMasterMuted = useTransportStore((state) => state.isMasterMuted);
   const isPlaying = useTransportStore((state) => state.isPlaying);

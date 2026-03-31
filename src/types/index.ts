@@ -14,6 +14,13 @@ export interface MidiNote {
   velocity: number;
 }
 
+interface BaseClip {
+  id: string;
+  name: string;
+  startTime: number;
+  duration: number;
+}
+
 export type LiveInputMode = "web-midi" | "qwerty";
 
 export interface LiveMidiMessage {
@@ -28,12 +35,16 @@ export interface LiveMidiMessage {
 
 export type ProjectTool = "pointer" | "split" | "trim";
 
-export interface MidiClip {
-  id: string;
-  name: string;
-  startTime: number;
-  duration: number;
+export interface MidiClip extends BaseClip {
+  clipType: "midi";
   notes: MidiNote[];
+  sourceFile?: string;
+  sourceTrackIndex?: number;
+  sourceChannel?: number;
+}
+
+export interface AudioClip extends BaseClip {
+  clipType: "audio";
   audioData?: ArrayBuffer;
   audioAssetPath?: string;
   audioFileName?: string;
@@ -41,18 +52,11 @@ export interface MidiClip {
   audioOffset?: number;
   sourceDuration?: number;
   waveformData?: number[];
-  sourceFile?: string;
-  sourceTrackIndex?: number;
-  sourceChannel?: number;
 }
 
-export type AudioClip = MidiClip;
-
-export interface ProjectTrack {
+interface BaseTrack {
   id: string;
   name: string;
-  type: "midi" | "audio";
-  clips: MidiClip[];
   trackColor?: string;
   volume: number;
   pan: number;
@@ -62,8 +66,30 @@ export interface ProjectTrack {
   instrument: InstrumentConfig;
 }
 
-export type AudioTrack = ProjectTrack;
-export type MidiTrack = ProjectTrack;
+export interface AudioTrack extends BaseTrack {
+  type: "audio";
+  clips: AudioClip[];
+}
+
+export interface MidiTrack extends BaseTrack {
+  type: "midi";
+  clips: MidiClip[];
+}
+
+export type ProjectClip = AudioClip | MidiClip;
+export type ProjectTrack = AudioTrack | MidiTrack;
+
+export const isAudioClip = (clip: ProjectClip): clip is AudioClip =>
+  clip.clipType === "audio";
+
+export const isMidiClip = (clip: ProjectClip): clip is MidiClip =>
+  clip.clipType === "midi";
+
+export const isAudioTrack = (track: ProjectTrack): track is AudioTrack =>
+  track.type === "audio";
+
+export const isMidiTrack = (track: ProjectTrack): track is MidiTrack =>
+  track.type === "midi";
 
 export interface AafImportRateInfo {
   entryPath: string;
@@ -99,6 +125,7 @@ export interface ProjectImportMetadata {
 export interface Project {
   id: string;
   name: string;
+  projectSchemaVersion?: number;
   bpm: number;
   timeSignatureNumerator?: number;
   timeSignatureDenominator?: number;
@@ -122,7 +149,7 @@ export interface ProjectSummary {
 export interface ImportedMidiProject {
   bpm: number;
   duration: number;
-  tracks: ProjectTrack[];
+  tracks: MidiTrack[];
 }
 
 export interface TransportState {

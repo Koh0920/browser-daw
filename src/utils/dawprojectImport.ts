@@ -1,4 +1,12 @@
-import type { MidiClip, MidiNote, Project, ProjectTrack } from "@/types";
+import type {
+  AudioClip,
+  AudioTrack,
+  MidiClip,
+  MidiNote,
+  MidiTrack,
+  Project,
+  ProjectTrack,
+} from "@/types";
 import { analyzeAudioData } from "@/utils/audioAnalysis";
 
 type DawprojectArchive = Record<string, Uint8Array>;
@@ -6,10 +14,9 @@ type DawprojectArchive = Record<string, Uint8Array>;
 const createId = () => crypto.randomUUID();
 
 const toArrayBuffer = (value: Uint8Array) => {
-  return value.buffer.slice(
-    value.byteOffset,
-    value.byteOffset + value.byteLength,
-  );
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(value);
+  return copy.buffer;
 };
 
 const inferMimeType = (filePath: string) => {
@@ -50,35 +57,52 @@ const normalizeProject = (
     id: normalizedProjectId,
     createdAt: Date.now(),
     lastModified: Date.now(),
-    tracks: project.tracks.map((track) => ({
-      ...track,
-      id: createId(),
-      clips: track.clips.map((clip) => {
-        const clipId = createId();
-        const archiveAssetPath = (
-          clip as MidiClip & { archiveAssetPath?: string }
-        ).archiveAssetPath;
-        const archivedAudioData = archiveAssetPath
-          ? getArchiveEntry(archive, archiveAssetPath)
-          : undefined;
+    tracks: project.tracks.map((track) => {
+      if (track.type === "audio") {
+        const clips: AudioClip[] = track.clips.map((clip) => {
+          const clipId = createId();
+          const archiveAssetPath = (clip as AudioClip & { archiveAssetPath?: string }).archiveAssetPath;
+          const archivedAudioData = archiveAssetPath
+            ? getArchiveEntry(archive, archiveAssetPath)
+            : undefined;
+
+          return {
+            ...clip,
+            clipType: "audio",
+            id: clipId,
+            audioAssetPath: undefined,
+            audioData: archivedAudioData
+              ? toArrayBuffer(archivedAudioData)
+              : clip.audioData,
+            audioMimeType:
+              clip.audioMimeType ??
+              (archiveAssetPath ? inferMimeType(archiveAssetPath) : undefined),
+          };
+        });
 
         return {
-          ...clip,
-          id: clipId,
-          audioAssetPath: undefined,
-          audioData: archivedAudioData
-            ? toArrayBuffer(archivedAudioData)
-            : clip.audioData,
-          audioMimeType:
-            clip.audioMimeType ??
-            (archiveAssetPath ? inferMimeType(archiveAssetPath) : undefined),
-          notes: clip.notes.map((note) => ({
-            ...note,
-            id: createId(),
-          })),
+          ...track,
+          id: createId(),
+          clips,
         };
-      }),
-    })),
+      }
+
+      const clips: MidiClip[] = track.clips.map((clip) => ({
+        ...clip,
+        clipType: "midi",
+        id: createId(),
+        notes: clip.notes.map((note) => ({
+          ...note,
+          id: createId(),
+        })),
+      }));
+
+      return {
+        ...track,
+        id: createId(),
+        clips,
+      };
+    }),
   };
 };
 
@@ -229,7 +253,7 @@ const parseXmlProject = (
         trackElement.querySelectorAll(
           "AudioClip, audioClip, MidiClip, midiClip",
         ),
-      ).map<MidiClip>((clipElement) => {
+      ).map((clipElement) => {
         const sourceElement = clipElement.querySelector("Source, source");
         const archiveAssetPath =
           sourceElement?.getAttribute("path") ?? undefined;
@@ -237,36 +261,73 @@ const parseXmlProject = (
           ? getArchiveEntry(archive, archiveAssetPath)
           : undefined;
 
-        return {
+        if (clipElement.tagName.toLowerCase().includes("audio")) {
+          const clip: AudioClip = {
+            id: createId(),
+            clipType: "audio",
+            name: clipElement.getAttribute("name") ?? `${trackType} clip`,
+            startTime: getRequiredNumber(clipElement, "start", 0),
+            duration: getRequiredNumber(clipElement, "duration", 1),
+            audioOffset: getRequiredNumber(clipElement, "offset", 0),
+            sourceDuration: getRequiredNumber(
+              clipElement,
+              "sourceDuration",
+              getRequiredNumber(clipElement, "duration", 1),
+            ),
+            audioData: archivedAudioData
+              ? toArrayBuffer(archivedAudioData)
+              : undefined,
+            audioFileName: archiveAssetPath?.split("/").pop(),
+            audioMimeType: archiveAssetPath
+              ? inferMimeType(archiveAssetPath)
+              : undefined,
+          };
+
+          return clip;
+        }
+
+        const clip: MidiClip = {
           id: createId(),
+          clipType: "midi",
           name: clipElement.getAttribute("name") ?? `${trackType} clip`,
           startTime: getRequiredNumber(clipElement, "start", 0),
           duration: getRequiredNumber(clipElement, "duration", 1),
-          audioOffset: getRequiredNumber(clipElement, "offset", 0),
-          sourceDuration: getRequiredNumber(
-            clipElement,
-            "sourceDuration",
-            getRequiredNumber(clipElement, "duration", 1),
-          ),
-          audioData: archivedAudioData
-            ? toArrayBuffer(archivedAudioData)
-            : undefined,
-          audioFileName: archiveAssetPath?.split("/").pop(),
-          audioMimeType: archiveAssetPath
-            ? inferMimeType(archiveAssetPath)
-            : undefined,
-          notes: clipElement.tagName.toLowerCase().includes("audio")
-            ? []
-            : parseNotes(clipElement),
+          notes: parseNotes(clipElement),
         };
+
+        return clip;
       });
 
-      return {
+      if (trackType === "audio") {
+        const audioTrack: AudioTrack = {
+          id: createId(),
+          name:
+            trackElement.getAttribute("name") ?? `Imported Track ${index + 1}`,
+          type: "audio",
+          clips: clips as AudioClip[],
+          volume: getRequiredNumber(channelElement, "volume", 0.8),
+          pan: getRequiredNumber(channelElement, "pan", 0),
+          muted: getBoolean(channelElement, "muted", false),
+          solo: getBoolean(channelElement, "solo", false),
+          instrument: {
+            type:
+              (deviceElement?.getAttribute(
+                "type",
+              ) as ProjectTrack["instrument"]["type"]) ?? "sampler",
+            patchId: deviceElement?.getAttribute("patchId") ?? undefined,
+            parameters: {},
+          },
+        };
+
+        return audioTrack;
+      }
+
+      const midiTrack: MidiTrack = {
         id: createId(),
         name:
           trackElement.getAttribute("name") ?? `Imported Track ${index + 1}`,
-        type: trackType === "audio" ? "audio" : "midi",
-        clips,
+        type: "midi",
+        clips: clips as MidiClip[],
         volume: getRequiredNumber(channelElement, "volume", 0.8),
         pan: getRequiredNumber(channelElement, "pan", 0),
         muted: getBoolean(channelElement, "muted", false),
@@ -276,11 +337,13 @@ const parseXmlProject = (
             (deviceElement?.getAttribute(
               "type",
             ) as ProjectTrack["instrument"]["type"]) ??
-            (trackType === "audio" ? "sampler" : "oscillator"),
+            "oscillator",
           patchId: deviceElement?.getAttribute("patchId") ?? undefined,
           parameters: {},
         },
       };
+
+      return midiTrack;
     }),
     createdAt: Date.now(),
     lastModified: Date.now(),

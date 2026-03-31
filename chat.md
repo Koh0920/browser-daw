@@ -1,3 +1,4 @@
+
 > From: https://gemini.google.com/app/2743b286090308e0?hl=ja
 
 # you asked

@@ -6,8 +6,18 @@ import {
   getTransportCurrentTime,
   subscribeTransportCurrentTime,
 } from "@/stores/transportStore";
+import {
+  createMidiNoteFromGridClick,
+  getMidiNoteMovePatch,
+  getMidiNoteResizePatch,
+  getMidiNoteSplitTime,
+  getMidiSplitPreview,
+  getMidiVelocityFromLanePosition,
+  resolveMidiNoteDragState,
+  splitMidiNote,
+} from "@/components/editor/midiPianoRollInteractions";
 import type { GridDivision } from "@/utils/grid";
-import { getGridStepSeconds, snapTimeToGrid } from "@/utils/grid";
+import { getGridStepSeconds } from "@/utils/grid";
 
 const ROW_HEIGHT = 20;
 const PIANO_WIDTH = 72;
@@ -45,9 +55,6 @@ interface MidiPianoRollProps {
   gridDivision?: GridDivision;
 }
 
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value));
-
 const MidiPianoRoll = ({
   track,
   clip,
@@ -58,12 +65,7 @@ const MidiPianoRoll = ({
 }: MidiPianoRollProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gridAreaRef = useRef<HTMLDivElement | null>(null);
-  const dragStateRef = useRef<{
-    noteId: string;
-    offsetX: number;
-    offsetY: number;
-    isResizing: boolean;
-  } | null>(null);
+  const dragStateRef = useRef<ReturnType<typeof resolveMidiNoteDragState> | null>(null);
   const velocityDragRef = useRef<{ noteId: string } | null>(null);
   const velocityLaneRef = useRef<HTMLDivElement | null>(null);
   const autoScrollTargetRef = useRef<number | null>(null);
@@ -106,8 +108,11 @@ const MidiPianoRoll = ({
     }
 
     const rect = velocityLaneRef.current.getBoundingClientRect();
-    const normalized = 1 - clamp((clientY - rect.top) / rect.height, 0, 1);
-    const nextVelocity = Math.round(20 + normalized * 107);
+    const nextVelocity = getMidiVelocityFromLanePosition(
+      clientY,
+      rect.top,
+      rect.height,
+    );
 
     replaceClipNotes(
       track.id,
@@ -273,20 +278,17 @@ const MidiPianoRoll = ({
       return;
     }
 
-    const pitchIndex = clamp(
-      Math.floor(localY / ROW_HEIGHT),
-      0,
-      pitches.length - 1,
-    );
-    const pitch = pitches[pitchIndex];
-
-    const note: MidiNote = {
-      id: crypto.randomUUID(),
-      pitch,
-      startTime: snapTimeToGrid(localX / PIXELS_PER_SECOND, bpm, gridDivision),
-      duration: beatDuration, // 1 beat default
-      velocity: 96,
-    };
+    const note: MidiNote = createMidiNoteFromGridClick({
+      localX,
+      localY,
+      pitches,
+      rowHeight: ROW_HEIGHT,
+      pixelsPerSecond: PIXELS_PER_SECOND,
+      bpm,
+      gridDivision,
+      beatDuration,
+      noteId: crypto.randomUUID(),
+    });
 
     replaceClipNotes(
       track.id,
@@ -314,20 +316,19 @@ const MidiPianoRoll = ({
       return;
     }
 
-    // Check if clicked near the right edge for resizing
     const clickX = event.clientX - noteRect.left;
-    const resizing = clickX > noteRect.width - 8;
 
     if (activeTool === "split") {
-      const splitOffset = snapTimeToGrid(
-        targetNote.startTime + clickX / PIXELS_PER_SECOND,
+      const splitOffset = getMidiNoteSplitTime({
+        note: targetNote,
+        localX: clickX,
+        pixelsPerSecond: PIXELS_PER_SECOND,
         bpm,
         gridDivision,
-        event.altKey,
-      );
-      const relativeSplit = splitOffset - targetNote.startTime;
+        disableSnap: event.altKey,
+      });
 
-      if (relativeSplit <= 0 || relativeSplit >= targetNote.duration) {
+      if (splitOffset <= targetNote.startTime || splitOffset >= targetNote.startTime + targetNote.duration) {
         setSelectedNoteId(noteId);
         return;
       }
@@ -335,35 +336,25 @@ const MidiPianoRoll = ({
       replaceClipNotes(
         track.id,
         clip.id,
-        clip.notes.flatMap((note) => {
-          if (note.id !== noteId) {
-            return [note];
-          }
-
-          return [
-            {
-              ...note,
-              duration: relativeSplit,
-            },
-            {
-              ...note,
-              id: crypto.randomUUID(),
-              startTime: splitOffset,
-              duration: note.duration - relativeSplit,
-            },
-          ];
+        splitMidiNote({
+          notes: clip.notes,
+          noteId,
+          splitTime: splitOffset,
+          nextNoteId: crypto.randomUUID(),
         }),
       );
       setSelectedNoteId(noteId);
       return;
     }
 
-    dragStateRef.current = {
+    dragStateRef.current = resolveMidiNoteDragState({
+      activeTool,
       noteId,
-      offsetX: clickX,
-      offsetY: event.clientY - noteRect.top,
-      isResizing: activeTool === "trim" ? true : resizing || isResizing,
-    };
+      clickX,
+      noteWidth: noteRect.width,
+      forceResize: isResizing,
+      pointerOffsetY: event.clientY - noteRect.top,
+    });
     setSelectedNoteId(noteId);
   };
 
@@ -392,47 +383,43 @@ const MidiPianoRoll = ({
     const disableSnap = event.altKey;
 
     if (isResizing) {
-      // Resize horizontally only
-      const rawDuration =
-        (localX - targetNote.startTime * PIXELS_PER_SECOND) / PIXELS_PER_SECOND;
-      const snappedDuration = Math.max(
+      const resizePatch = getMidiNoteResizePatch({
+        note: targetNote,
+        localX,
+        pixelsPerSecond: PIXELS_PER_SECOND,
+        bpm,
+        gridDivision,
         gridStep,
-        snapTimeToGrid(rawDuration, bpm, gridDivision, disableSnap),
-      );
+        disableSnap,
+      });
 
       replaceClipNotes(
         track.id,
         clip.id,
         clip.notes.map((note) =>
-          note.id === noteId ? { ...note, duration: snappedDuration } : note,
+          note.id === noteId ? { ...note, ...resizePatch } : note,
         ),
       );
     } else {
-      // Move both vertically and horizontally
-      const nextPitch =
-        pitches[
-          clamp(
-            Math.floor((localY - offsetY) / ROW_HEIGHT),
-            0,
-            pitches.length - 1,
-          )
-        ];
-      const nextStartTime = Math.max(
-        0,
-        snapTimeToGrid(
-          (localX - offsetX) / PIXELS_PER_SECOND,
-          bpm,
-          gridDivision,
-          disableSnap,
-        ),
-      );
+      const movePatch = getMidiNoteMovePatch({
+        note: targetNote,
+        dragState: { noteId, offsetX, offsetY, isResizing },
+        localX,
+        localY,
+        pitches,
+        rowHeight: ROW_HEIGHT,
+        pixelsPerSecond: PIXELS_PER_SECOND,
+        bpm,
+        gridDivision,
+        disableSnap,
+      });
 
       replaceClipNotes(
         track.id,
         clip.id,
         clip.notes.map((note) =>
           note.id === noteId
-            ? { ...note, pitch: nextPitch, startTime: nextStartTime }
+            ? { ...note, ...movePatch }
             : note,
         ),
       );
@@ -454,23 +441,16 @@ const MidiPianoRoll = ({
 
     const rect = event.currentTarget.getBoundingClientRect();
     const localX = event.clientX - rect.left;
-    const splitTime = snapTimeToGrid(
-      note.startTime + localX / PIXELS_PER_SECOND,
-      bpm,
-      gridDivision,
-      event.altKey,
+    setSplitPreview(
+      getMidiSplitPreview({
+        note,
+        localX,
+        pixelsPerSecond: PIXELS_PER_SECOND,
+        bpm,
+        gridDivision,
+        disableSnap: event.altKey,
+      }),
     );
-    const relativeSplit = splitTime - note.startTime;
-
-    if (relativeSplit <= 0 || relativeSplit >= note.duration) {
-      setSplitPreview(null);
-      return;
-    }
-
-    setSplitPreview({
-      noteId: note.id,
-      left: splitTime * PIXELS_PER_SECOND,
-    });
   };
 
   // Render timeline ruler marks

@@ -53,8 +53,12 @@ import {
 import AudioEditor from "@/components/editor/AudioEditor";
 import { ArrangementView } from "@/components/editor/ArrangementView";
 import MidiPianoRoll from "@/components/editor/MidiPianoRoll";
+import InstrumentParameterEditor from "@/components/project/InstrumentParameterEditor";
 import QwertyMidiKeyboardDialog from "@/components/project/QwertyMidiKeyboardDialog";
-import { INSTRUMENTS, getInstrumentDefinition } from "@/audio/instruments";
+import {
+  getInstrumentDefinition,
+  listInstrumentDefinitions,
+} from "@/audio/instruments";
 import {
   Dialog,
   DialogContent,
@@ -69,6 +73,7 @@ import { useAudioEngine } from "@/hooks/useAudioEngine";
 import { useAudioExport } from "@/hooks/useAudioExport";
 import { useMidiInput } from "@/hooks/useMidiInput";
 import { useProjectDatabase } from "@/hooks/useProjectDatabase";
+import { createDefaultTrackInstrument } from "@/projects/projectSchema";
 import { useTransport } from "@/hooks/useTransport";
 import { useProjectStore } from "@/stores/projectStore";
 import {
@@ -117,6 +122,7 @@ const LCD_UPDATE_INTERVAL_MS = 80;
 const RECORDING_FLUSH_INTERVAL_MS = 96;
 const MIN_RECORDED_NOTE_DURATION = 0.05;
 const QWERTY_INPUT_ID = "qwerty";
+const INSTRUMENT_OPTIONS = listInstrumentDefinitions();
 
 const isEditableTarget = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) {
@@ -406,6 +412,14 @@ const ProjectPage = () => {
     selectedTrack?.clips.find((clip) => clip.id === selectedClipId) ??
     selectedTrack?.clips[0] ??
     null;
+  const selectedMidiClip =
+    selectedTrack?.type === "midi" && selectedClip?.clipType === "midi"
+      ? selectedClip
+      : null;
+  const selectedAudioClip =
+    selectedTrack?.type === "audio" && selectedClip?.clipType === "audio"
+      ? selectedClip
+      : null;
   const armedMidiTrack = useMemo(() => {
     return (
       currentProject?.tracks.find(
@@ -522,7 +536,7 @@ const ProjectPage = () => {
       .currentProject?.tracks.find((track) => track.id === trackId)
       ?.clips.find((candidate) => candidate.id === clipId);
 
-    if (!clip || clip.notes.length > 0) {
+    if (!clip || clip.clipType !== "midi" || clip.notes.length > 0) {
       return;
     }
 
@@ -546,17 +560,17 @@ const ProjectPage = () => {
   };
 
   const handleDeleteSelectedMidiClip = () => {
-    if (selectedTrack?.type !== "midi" || !selectedClip) {
+    if (selectedTrack?.type !== "midi" || !selectedMidiClip) {
       return;
     }
 
-    const deletedClipName = selectedClip.name;
+    const deletedClipName = selectedMidiClip.name;
 
-    if (isRecording && recordingClipIdRef.current === selectedClip.id) {
+    if (isRecording && recordingClipIdRef.current === selectedMidiClip.id) {
       finalizeRecordingSession();
     }
 
-    removeClip(selectedTrack.id, selectedClip.id);
+    removeClip(selectedTrack.id, selectedMidiClip.id);
     setIsDeleteClipDialogOpen(false);
     setStatusMessage(`${deletedClipName} was removed.`);
   };
@@ -720,7 +734,7 @@ const ProjectPage = () => {
       return null;
     }
 
-    const audioFileName = selectedClip?.audioFileName;
+    const audioFileName = selectedAudioClip?.audioFileName;
 
     return (
       aafImportMetadata.aafHints.find(
@@ -733,7 +747,7 @@ const ProjectPage = () => {
       ) ??
       null
     );
-  }, [aafImportMetadata, selectedClip?.audioFileName, selectedTrack]);
+  }, [aafImportMetadata, selectedAudioClip?.audioFileName, selectedTrack]);
   const inputModeLabel = selectedInputMode === "qwerty" ? "QWERTY" : "Web MIDI";
   const inputLabel = activeInput?.name ?? "Computer Keyboard";
   const inputHint =
@@ -1400,7 +1414,7 @@ const ProjectPage = () => {
                       ) : (
                         <MidiPianoRoll
                           track={selectedTrack}
-                          clip={selectedClip}
+                          clip={selectedMidiClip}
                           duration={currentProject.duration}
                           bpm={currentProject.bpm}
                           beatsPerBar={beatsPerBar}
@@ -1465,16 +1479,13 @@ const ProjectPage = () => {
                                     "basic-synth"
                                   }
                                   onValueChange={(value) => {
-                                    const instrumentDefinition =
-                                      getInstrumentDefinition(value);
                                     useProjectStore
                                       .getState()
                                       .updateTrack(selectedTrack.id, {
-                                        instrument: {
-                                          type: instrumentDefinition.type,
+                                        instrument: createDefaultTrackInstrument("midi", {
+                                          type: getInstrumentDefinition(value).type,
                                           patchId: value,
-                                          parameters: {},
-                                        },
+                                        }),
                                       });
                                   }}
                                 >
@@ -1482,17 +1493,15 @@ const ProjectPage = () => {
                                     <SelectValue placeholder="Select an instrument" />
                                   </SelectTrigger>
                                   <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
-                                    {Object.values(INSTRUMENTS).map(
-                                      (instrument) => (
-                                        <SelectItem
-                                          key={instrument.id}
-                                          value={instrument.id}
-                                          className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
-                                        >
-                                          {instrument.name}
-                                        </SelectItem>
-                                      ),
-                                    )}
+                                    {INSTRUMENT_OPTIONS.map((instrument) => (
+                                      <SelectItem
+                                        key={instrument.id}
+                                        value={instrument.id}
+                                        className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                                      >
+                                        {instrument.name}
+                                      </SelectItem>
+                                    ))}
                                   </SelectContent>
                                 </Select>
                               ) : (
@@ -1501,6 +1510,12 @@ const ProjectPage = () => {
                               )}
                             </dd>
                           </div>
+                          {selectedTrack.type === "midi" ? (
+                            <InstrumentParameterEditor
+                              trackId={selectedTrack.id}
+                              instrument={selectedTrack.instrument}
+                            />
+                          ) : null}
                           <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
                             <div className="flex items-center justify-between">
                               <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
@@ -1848,7 +1863,7 @@ const ProjectPage = () => {
                               Notes
                             </dt>
                             <dd className="font-mono text-xs font-semibold text-slate-200">
-                              {selectedClip?.notes.length ?? 0}
+                              {selectedMidiClip?.notes.length ?? 0}
                             </dd>
                           </div>
                           <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">

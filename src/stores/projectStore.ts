@@ -1,12 +1,20 @@
 import { create } from "zustand";
 import type {
+  AudioClip,
+  AudioTrack,
   MidiClip,
   MidiNote,
+  MidiTrack,
   Project,
   ProjectTool,
   ProjectTrack,
 } from "@/types";
 import { useTransportStore } from "@/stores/transportStore";
+import {
+  PROJECT_SCHEMA_VERSION,
+  createDefaultTrackInstrument,
+  migrateProjectSchema,
+} from "@/projects/projectSchema";
 import { analyzeAudioData } from "@/utils/audioAnalysis";
 import { parseMidiFile } from "@/utils/midiImport";
 import { writeAudioAsset } from "@/utils/audioStorage";
@@ -32,6 +40,7 @@ const touchProject = (project: Project): Project => ({
 
 const createMidiClip = (name: string, startTime: number): MidiClip => ({
   id: createId(),
+  clipType: "midi",
   name,
   startTime,
   duration: 0.25,
@@ -42,7 +51,7 @@ const createMidiTrack = (
   trackCount: number,
   duration: number,
   name?: string,
-): ProjectTrack => ({
+): MidiTrack => ({
   id: createId(),
   name: name || `MIDI Track ${trackCount + 1}`,
   type: "midi",
@@ -50,6 +59,7 @@ const createMidiTrack = (
   clips: [
     {
       id: createId(),
+      clipType: "midi",
       name: "Default Clip",
       startTime: 0,
       duration,
@@ -61,16 +71,10 @@ const createMidiTrack = (
   muted: false,
   solo: false,
   recordArmed: false,
-  instrument: {
-    type: "oscillator",
-    parameters: {
-      gain: 1.0,
-      oscType: "triangle",
-    },
-  },
+  instrument: createDefaultTrackInstrument("midi"),
 });
 
-const createAudioTrack = (trackCount: number, name?: string): ProjectTrack => ({
+const createAudioTrack = (trackCount: number, name?: string): AudioTrack => ({
   id: createId(),
   name: name || `Audio Track ${trackCount + 1}`,
   type: "audio",
@@ -81,13 +85,10 @@ const createAudioTrack = (trackCount: number, name?: string): ProjectTrack => ({
   muted: false,
   solo: false,
   recordArmed: false,
-  instrument: {
-    type: "sampler",
-    parameters: {},
-  },
+  instrument: createDefaultTrackInstrument("audio"),
 });
 
-const clampAudioClipDuration = (clip: MidiClip) => {
+const clampAudioClipDuration = (clip: AudioClip) => {
   const sourceOffset = clip.audioOffset ?? 0;
   const sourceDuration = clip.sourceDuration ?? clip.duration;
   return Math.max(
@@ -192,7 +193,10 @@ interface ProjectState {
     trimMode: "start" | "end",
   ) => void;
   splitClip: (trackId: string, clipId: string, splitTime: number) => void;
-  updateTrack: (trackId: string, updates: Partial<ProjectTrack>) => void;
+  updateTrack: (
+    trackId: string,
+    updates: Partial<Omit<ProjectTrack, "id" | "type" | "clips">>,
+  ) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -207,6 +211,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     const project: Project = {
       id: createId(),
       name,
+      projectSchemaVersion: PROJECT_SCHEMA_VERSION,
       bpm: 120,
       timeSignatureNumerator: 4,
       timeSignatureDenominator: 4,
@@ -228,15 +233,35 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   loadProject: (project) => {
-    const normalizedProject: Project = {
-      ...project,
-      timeSignatureNumerator: project.timeSignatureNumerator ?? 4,
-      timeSignatureDenominator: project.timeSignatureDenominator ?? 4,
-      tracks: project.tracks.map((track, index) => ({
+    const migratedProject = migrateProjectSchema(project);
+    const normalizedTracks: ProjectTrack[] = migratedProject.tracks.map((track, index) => {
+      if (track.type === "audio") {
+        return {
+          ...track,
+          trackColor: track.trackColor ?? pickTrackColor(index),
+          recordArmed: track.recordArmed ?? false,
+          clips: track.clips.map((clip) => ({
+            ...clip,
+            clipType: "audio" as const,
+          })),
+        };
+      }
+
+      return {
         ...track,
         trackColor: track.trackColor ?? pickTrackColor(index),
         recordArmed: track.recordArmed ?? false,
-      })),
+        clips: track.clips.map((clip) => ({
+          ...clip,
+          clipType: "midi" as const,
+          notes: clip.notes ?? [],
+        })),
+      };
+    });
+
+    const normalizedProject: Project = {
+      ...migratedProject,
+      tracks: normalizedTracks,
     };
 
     set({
@@ -422,7 +447,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
 
       const nextTracks = state.currentProject.tracks.map((track) => {
-        if (track.id !== trackId) {
+        if (track.id !== trackId || track.type !== "midi") {
           return track;
         }
 
@@ -475,9 +500,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
         return state;
       }
 
-      const nextTracks = state.currentProject.tracks.map((track) => {
+      const nextTracks: ProjectTrack[] = state.currentProject.tracks.map((track) => {
         if (track.id !== trackId) {
           return track;
+        }
+
+        if (track.type === "audio") {
+          return {
+            ...track,
+            clips: track.clips.filter((clip) => clip.id !== clipId),
+          };
         }
 
         return {
@@ -537,17 +569,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
         return projectState;
       }
 
-      const tracks = projectState.currentProject.tracks.map((track) => {
+      const tracks: ProjectTrack[] = projectState.currentProject.tracks.map((track) => {
         if (track.id !== trackId || track.type !== "audio") {
           return track;
         }
 
-        const clip: MidiClip = {
+        const clip: AudioClip = {
           id: clipId,
+          clipType: "audio",
           name: clipInput.name,
           startTime: clipInput.startTime,
           duration: analysis.duration,
-          notes: [],
           audioData: clipInput.audioData,
           audioAssetPath: audioAssetPath ?? undefined,
           audioFileName: clipInput.audioFileName ?? clipInput.name,
@@ -687,7 +719,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           return track;
         }
 
-        const nextClips: MidiClip[] = [];
+        const nextClips: AudioClip[] = [];
 
         track.clips.forEach((clip) => {
           if (clip.id !== clipId) {
@@ -808,7 +840,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
 
       const tracks = state.currentProject.tracks.map((track) => {
-        if (track.id !== trackId) {
+        if (track.id !== trackId || track.type !== "midi") {
           return track;
         }
 
@@ -853,6 +885,22 @@ export const useProjectStore = create<ProjectState>((set) => ({
           return track;
         }
 
+        if (track.type === "audio") {
+          return {
+            ...track,
+            clips: track.clips
+              .map((clip) =>
+                clip.id === clipId
+                  ? {
+                      ...clip,
+                      startTime: Math.max(0, startTime),
+                    }
+                  : clip,
+              )
+              .sort((left, right) => left.startTime - right.startTime),
+          };
+        }
+
         return {
           ...track,
           clips: track.clips
@@ -889,14 +937,14 @@ export const useProjectStore = create<ProjectState>((set) => ({
           return track;
         }
 
-        return {
-          ...track,
-          clips: track.clips.map((clip) => {
-            if (clip.id !== clipId) {
-              return clip;
-            }
+        if (track.type === "audio") {
+          return {
+            ...track,
+            clips: track.clips.map((clip) => {
+              if (clip.id !== clipId) {
+                return clip;
+              }
 
-            if (track.type === "audio") {
               if (trimMode === "start") {
                 const nextStartTime = Math.max(0, startTime);
                 const startDelta = Math.max(0, nextStartTime - clip.startTime);
@@ -922,6 +970,15 @@ export const useProjectStore = create<ProjectState>((set) => ({
                   duration: Math.max(0.05, duration),
                 }),
               };
+            }),
+          };
+        }
+
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.id !== clipId) {
+              return clip;
             }
 
             if (trimMode === "start") {
@@ -975,21 +1032,21 @@ export const useProjectStore = create<ProjectState>((set) => ({
           return track;
         }
 
-        const nextClips: MidiClip[] = [];
+        if (track.type === "audio") {
+          const nextClips: AudioClip[] = [];
 
-        track.clips.forEach((clip) => {
-          if (clip.id !== clipId) {
-            nextClips.push(clip);
-            return;
-          }
+          track.clips.forEach((clip) => {
+            if (clip.id !== clipId) {
+              nextClips.push(clip);
+              return;
+            }
 
-          const relativeSplitTime = splitTime - clip.startTime;
-          if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) {
-            nextClips.push(clip);
-            return;
-          }
+            const relativeSplitTime = splitTime - clip.startTime;
+            if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) {
+              nextClips.push(clip);
+              return;
+            }
 
-          if (track.type === "audio") {
             nextClips.push({
               ...clip,
               duration: relativeSplitTime,
@@ -1002,6 +1059,27 @@ export const useProjectStore = create<ProjectState>((set) => ({
               duration: clip.duration - relativeSplitTime,
               audioOffset: (clip.audioOffset ?? 0) + relativeSplitTime,
             });
+          });
+
+          return {
+            ...track,
+            clips: nextClips.sort(
+              (left, right) => left.startTime - right.startTime,
+            ),
+          };
+        }
+
+        const nextClips: MidiClip[] = [];
+
+        track.clips.forEach((clip) => {
+          if (clip.id !== clipId) {
+            nextClips.push(clip);
+            return;
+          }
+
+          const relativeSplitTime = splitTime - clip.startTime;
+          if (relativeSplitTime <= 0 || relativeSplitTime >= clip.duration) {
+            nextClips.push(clip);
             return;
           }
 
@@ -1057,7 +1135,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           ...track,
           ...updates,
         };
-      });
+      }) as ProjectTrack[];
 
       return {
         currentProject: touchProject({

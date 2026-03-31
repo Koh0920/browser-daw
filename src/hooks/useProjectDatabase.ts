@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import Dexie from "dexie";
 import type { Project, ProjectSummary } from "@/types";
+import { migrateProjectSchema } from "@/projects/projectSchema";
 import {
   deleteProjectAudioAssets,
   hydrateProjectAudioAssets,
@@ -24,7 +25,9 @@ const db = new ProjectDatabase();
 export const useProjectDatabase = () => {
   const saveProject = useCallback(async (project: Project) => {
     try {
-      const storedProject = await prepareProjectForStorage(project);
+      const storedProject = await prepareProjectForStorage(
+        migrateProjectSchema(project),
+      );
       await db.projects.put(storedProject);
       return true;
     } catch (error) {
@@ -40,7 +43,7 @@ export const useProjectDatabase = () => {
         return null;
       }
 
-      return hydrateProjectAudioAssets(project);
+      return migrateProjectSchema(await hydrateProjectAudioAssets(project));
     } catch (error) {
       console.error("Error getting project:", error);
       return null;

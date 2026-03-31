@@ -46,37 +46,40 @@ const buildProjectXml = (
 ) => {
   const tracksXml = project.tracks
     .map((track) => {
-      const clipsXml = track.clips
-        .map((clip) => {
-          if (track.type === "audio") {
-            const assetPath = audioAssetLookup.get(clip.id) ?? "";
+      const clipsXml =
+        track.type === "audio"
+          ? track.clips
+              .map((clip) => {
+                const assetPath = audioAssetLookup.get(clip.id) ?? "";
 
-            return [
-              `        <AudioClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}" offset="${clip.audioOffset ?? 0}" sourceDuration="${clip.sourceDuration ?? clip.duration}">`,
-              assetPath
-                ? `          <Source path="${escapeXml(assetPath)}" />`
-                : "",
-              "        </AudioClip>",
-            ]
-              .filter(Boolean)
+                return [
+                  `        <AudioClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}" offset="${clip.audioOffset ?? 0}" sourceDuration="${clip.sourceDuration ?? clip.duration}">`,
+                  assetPath
+                    ? `          <Source path="${escapeXml(assetPath)}" />`
+                    : "",
+                  "        </AudioClip>",
+                ]
+                  .filter(Boolean)
+                  .join("\n");
+              })
+              .join("\n")
+          : track.clips
+              .map((clip) => {
+                const notesXml = clip.notes
+                  .map((note) => {
+                    return `          <Note id="${escapeXml(note.id)}" pitch="${note.pitch}" start="${note.startTime}" duration="${note.duration}" velocity="${note.velocity}" />`;
+                  })
+                  .join("\n");
+
+                return [
+                  `        <MidiClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}">`,
+                  notesXml,
+                  "        </MidiClip>",
+                ]
+                  .filter(Boolean)
+                  .join("\n");
+              })
               .join("\n");
-          }
-
-          const notesXml = clip.notes
-            .map((note) => {
-              return `          <Note id="${escapeXml(note.id)}" pitch="${note.pitch}" start="${note.startTime}" duration="${note.duration}" velocity="${note.velocity}" />`;
-            })
-            .join("\n");
-
-          return [
-            `        <MidiClip id="${escapeXml(clip.id)}" name="${escapeXml(clip.name)}" start="${clip.startTime}" duration="${clip.duration}">`,
-            notesXml,
-            "        </MidiClip>",
-          ]
-            .filter(Boolean)
-            .join("\n");
-        })
-        .join("\n");
 
       return [
         `    <Track id="${escapeXml(track.id)}" name="${escapeXml(track.name)}" contentType="${track.type}">`,

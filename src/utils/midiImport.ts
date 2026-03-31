@@ -1,5 +1,6 @@
 import { Midi } from "@tonejs/midi"
-import type { ImportedMidiProject, MidiClip, MidiNote, ProjectTrack } from "@/types"
+import { createDefaultTrackInstrument } from "@/projects/projectSchema"
+import type { ImportedMidiProject, MidiClip, MidiNote, MidiTrack } from "@/types"
 
 const createId = () => crypto.randomUUID()
 
@@ -7,7 +8,7 @@ export async function parseMidiFile(file: File): Promise<ImportedMidiProject> {
   const buffer = await file.arrayBuffer()
   const midi = new Midi(buffer)
 
-  const tracks: ProjectTrack[] = midi.tracks
+  const tracks: MidiTrack[] = midi.tracks
     .filter((track) => track.notes.length > 0)
     .map((track, index) => {
       const notes: MidiNote[] = track.notes.map((note) => ({
@@ -24,6 +25,7 @@ export async function parseMidiFile(file: File): Promise<ImportedMidiProject> {
 
       const clip: MidiClip = {
         id: createId(),
+        clipType: "midi",
         name: track.name || `Clip ${index + 1}`,
         startTime: 0,
         duration: clipDuration,
@@ -42,11 +44,11 @@ export async function parseMidiFile(file: File): Promise<ImportedMidiProject> {
         pan: 0,
         muted: false,
         solo: false,
-        instrument: {
+        instrument: createDefaultTrackInstrument("midi", {
           type: "oscillator",
           patchId: track.instrument.name || "Basic Synth",
           parameters: { gain: 0.5 },
-        },
+        }),
       }
     })
 

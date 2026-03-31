@@ -7,9 +7,17 @@ import {
   getTransportCurrentTime,
   subscribeTransportCurrentTime,
 } from "@/stores/transportStore";
+import {
+  createArrangementDragPreview,
+  createArrangementDragState,
+  getArrangementDragPreview,
+  getSplitClipTime,
+  resolveClipDragAction,
+} from "@/components/editor/arrangementInteractions";
 import type { GridDivision } from "@/utils/grid";
-import { getGridStepSeconds, snapTimeToGrid } from "@/utils/grid";
+import { getGridStepSeconds } from "@/utils/grid";
 import { formatTime } from "@/utils/timeFormat";
+import type { AudioClip, MidiClip } from "@/types";
 
 const TRACK_HEIGHT = 84;
 const TRACK_HEADER_WIDTH = 292;
@@ -42,22 +50,9 @@ export const ArrangementView = ({
   const isPlayingRef = useRef(false);
   const autoScrollTargetRef = useRef<number | null>(null);
   const lastAutoscrollAtRef = useRef(0);
-  const dragStateRef = useRef<{
-    action: "move" | "trim-start" | "trim-end";
-    trackId: string;
-    clipId: string;
-    originStartTime: number;
-    originDuration: number;
-    pointerStartX: number;
-  } | null>(null);
+  const dragStateRef = useRef<ReturnType<typeof createArrangementDragState> | null>(null);
   const [zoom, setZoom] = useState(56);
-  const [dragPreview, setDragPreview] = useState<{
-    trackId: string;
-    clipId: string;
-    startTime: number;
-    duration: number;
-    action: "move" | "trim-start" | "trim-end";
-  } | null>(null);
+  const [dragPreview, setDragPreview] = useState<ReturnType<typeof createArrangementDragPreview> | null>(null);
   const currentProject = useProjectStore((state) => state.currentProject);
   const activeTool = useProjectStore((state) => state.activeTool);
   const selectedTrackId = useProjectStore((state) => state.selectedTrackId);
@@ -201,48 +196,38 @@ export const ArrangementView = ({
 
     const rect = event.currentTarget.getBoundingClientRect();
     const localX = event.clientX - rect.left;
-    const nearStart = localX <= 10;
-    const nearEnd = rect.width - localX <= 10;
 
     if (activeTool === "split") {
-      const splitAt = snapTimeToGrid(
-        clip.startTime + localX / zoom,
+      const splitAt = getSplitClipTime({
+        clipStartTime: clip.startTime,
+        localX,
+        zoom,
         bpm,
         gridDivision,
-        event.altKey,
-      );
+        disableSnap: event.altKey,
+      });
       splitClip(trackId, clip.id, splitAt);
       return;
     }
 
-    let action: "move" | "trim-start" | "trim-end" | null = null;
-    if (nearStart) {
-      action = "trim-start";
-    } else if (nearEnd) {
-      action = "trim-end";
-    } else if (activeTool === "pointer") {
-      action = "move";
-    }
+    const action = resolveClipDragAction({
+      activeTool,
+      localX,
+      clipWidth: rect.width,
+    });
 
     if (!action) {
       return;
     }
 
-    dragStateRef.current = {
-      action,
+    const dragState = createArrangementDragState(
       trackId,
-      clipId: clip.id,
-      originStartTime: clip.startTime,
-      originDuration: clip.duration,
-      pointerStartX: event.clientX,
-    };
-    setDragPreview({
-      trackId,
-      clipId: clip.id,
-      startTime: clip.startTime,
-      duration: clip.duration,
+      clip,
       action,
-    });
+      event.clientX,
+    );
+    dragStateRef.current = dragState;
+    setDragPreview(createArrangementDragPreview(dragState));
   };
 
   const handlePointerMove = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -251,65 +236,16 @@ export const ArrangementView = ({
       return;
     }
 
-    const deltaSeconds = (event.clientX - dragState.pointerStartX) / zoom;
-    const disableSnap = event.altKey;
-
-    if (dragState.action === "move") {
-      const nextStartTime = snapTimeToGrid(
-        dragState.originStartTime + deltaSeconds,
+    setDragPreview(
+      getArrangementDragPreview({
+        dragState,
+        pointerClientX: event.clientX,
+        zoom,
         bpm,
         gridDivision,
-        disableSnap,
-      );
-      setDragPreview({
-        ...dragState,
-        startTime: nextStartTime,
-        duration: dragState.originDuration,
-      });
-      return;
-    }
-
-    if (dragState.action === "trim-start") {
-      const nextStartTime = Math.min(
-        dragState.originStartTime + dragState.originDuration - 0.05,
-        snapTimeToGrid(
-          dragState.originStartTime + deltaSeconds,
-          bpm,
-          gridDivision,
-          disableSnap,
-        ),
-      );
-      const nextDuration = Math.max(
-        0.05,
-        dragState.originDuration - (nextStartTime - dragState.originStartTime),
-      );
-
-      setDragPreview({
-        ...dragState,
-        startTime: Math.max(0, nextStartTime),
-        duration: nextDuration,
-      });
-      return;
-    }
-
-    const rawEndTime =
-      dragState.originStartTime + dragState.originDuration + deltaSeconds;
-    const snappedEndTime = snapTimeToGrid(
-      rawEndTime,
-      bpm,
-      gridDivision,
-      disableSnap,
+        disableSnap: event.altKey,
+      }),
     );
-    const nextDuration = Math.max(
-      0.05,
-      snappedEndTime - dragState.originStartTime,
-    );
-
-    setDragPreview({
-      ...dragState,
-      startTime: dragState.originStartTime,
-      duration: nextDuration,
-    });
   };
 
   const handlePointerUp = () => {
@@ -653,7 +589,12 @@ export const ArrangementView = ({
                       {track.clips.map((clip) => {
                         const isClipSelected = clip.id === selectedClipId;
                         const isAudio = track.type === "audio";
-                        const clipNotes = clip.notes;
+                        const clipNotes =
+                          track.type === "midi" ? (clip as MidiClip).notes : [];
+                        const waveformData =
+                          track.type === "audio"
+                            ? (clip as AudioClip).waveformData
+                            : undefined;
                         const preview =
                           dragPreview?.trackId === track.id &&
                           dragPreview.clipId === clip.id
@@ -707,11 +648,11 @@ export const ArrangementView = ({
                                   </span>
                                 </div>
 
-                                {isAudio && clip.waveformData ? (
+                                {isAudio && waveformData ? (
                                   <div className="flex h-7 items-end gap-px px-2 pb-2 opacity-80">
-                                    {clip.waveformData
+                                    {waveformData
                                       .slice(0, 48)
-                                      .map((value, index) => (
+                                      .map((value: number, index: number) => (
                                         <div
                                           key={`${clip.id}-${index}`}
                                           className="w-full rounded-full bg-white/80"
@@ -723,7 +664,7 @@ export const ArrangementView = ({
                                   </div>
                                 ) : clipNotes.length > 0 ? (
                                   <div className="relative mx-2 mb-2 h-8 overflow-hidden rounded-md bg-black/10">
-                                    {clipNotes.slice(0, 18).map((note) => {
+                                    {clipNotes.slice(0, 18).map((note: MidiClip["notes"][number]) => {
                                       const left =
                                         (note.startTime /
                                           Math.max(clip.duration, 0.01)) *

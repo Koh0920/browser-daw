@@ -7,22 +7,11 @@ type MidiInputDevice = {
   inputMode: LiveInputMode;
 };
 
-type MidiAccessLike = {
-  inputs: Map<string, MidiInputLike>;
-  onstatechange: ((event: Event) => void) | null;
-};
+type MidiAccessLike = MIDIAccess;
 
-type MidiInputLike = {
-  id: string;
-  name?: string;
-  manufacturer?: string;
-  onmidimessage: ((event: MidiMessageEventLike) => void) | null;
-};
+type MidiInputLike = MIDIInput;
 
-type MidiMessageEventLike = {
-  data?: Uint8Array;
-  timeStamp: number;
-};
+type MidiMessageEventLike = MIDIMessageEvent;
 
 type NavigatorWithMidi = Navigator & {
   requestMIDIAccess?: () => Promise<MidiAccessLike>;

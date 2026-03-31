@@ -1,14 +1,12 @@
-"use client"
-
 import type React from "react"
 
 import { useRef, useEffect, useState } from "react"
 import { useProjectStore } from "@/stores/projectStore"
 import { useTransport, useTransportCurrentTime } from "@/hooks/useTransport"
-import type { ProjectTrack, MidiNote, MidiClip } from "@/types"
+import type { MidiTrack, MidiNote, MidiClip } from "@/types"
 
 interface PianoRollProps {
-  track: ProjectTrack
+  track: MidiTrack
 }
 
 const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -21,7 +19,7 @@ const PianoRoll = ({ track }: PianoRollProps) => {
   const pianoRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const { currentProject, updateMidiClip, addMidiClip } = useProjectStore()
+  const { currentProject, replaceClipNotes } = useProjectStore()
   const currentTime = useTransportCurrentTime()
   const { isPlaying } = useTransport()
 
@@ -39,18 +37,9 @@ const PianoRoll = ({ track }: PianoRollProps) => {
     if (track.clips && track.clips.length > 0) {
       setSelectedClip(track.clips[0])
     } else {
-      // Create a new clip if none exists
-      const newClip: MidiClip = {
-        id: `clip-${Date.now()}`,
-        name: "New Clip",
-        startTime: 0,
-        duration: 4, // 4 seconds
-        notes: [],
-      }
-      addMidiClip(track.id, newClip)
-      setSelectedClip(newClip)
+      setSelectedClip(null)
     }
-  }, [track.id, track.clips, addMidiClip])
+  }, [track.clips])
 
   // Draw piano roll
   useEffect(() => {
@@ -235,7 +224,7 @@ const PianoRoll = ({ track }: PianoRollProps) => {
       }
 
       const updatedNotes = [...selectedClip.notes, newNote]
-      updateMidiClip(track.id, selectedClip.id, { notes: updatedNotes })
+      replaceClipNotes(track.id, selectedClip.id, updatedNotes)
     }
   }
 
@@ -256,7 +245,7 @@ const PianoRoll = ({ track }: PianoRollProps) => {
         const updatedNotes = selectedClip.notes.map((note) =>
           note.id === dragNote.note.id ? { ...note, duration: newDuration } : note,
         )
-        updateMidiClip(track.id, selectedClip.id, { notes: updatedNotes })
+        replaceClipNotes(track.id, selectedClip.id, updatedNotes)
       } else {
         // Move the note
         const dy = y - dragStart.y
@@ -267,7 +256,7 @@ const PianoRoll = ({ track }: PianoRollProps) => {
         const updatedNotes = selectedClip.notes.map((note) =>
           note.id === dragNote.note.id ? { ...note, pitch: newPitch, startTime: newStartTime } : note,
         )
-        updateMidiClip(track.id, selectedClip.id, { notes: updatedNotes })
+        replaceClipNotes(track.id, selectedClip.id, updatedNotes)
       }
 
       setDragStart({ x, y })
