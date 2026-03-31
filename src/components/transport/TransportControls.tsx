@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { useProjectStore } from "@/stores/projectStore"
-import { useTransport } from "@/hooks/useTransport"
+import { useTransport, useTransportCurrentTime } from "@/hooks/useTransport"
 import { formatTime } from "@/utils/timeFormat"
 
 interface TransportControlsProps {
@@ -19,7 +19,8 @@ interface TransportControlsProps {
 
 const TransportControls = ({ readOnly = false }: TransportControlsProps) => {
   const { currentProject, updateProjectSettings } = useProjectStore()
-  const { isPlaying, currentTime, isLooping, loopStart, loopEnd, togglePlay, stop, rewind, setLooping, setLoopPoints } =
+  const currentTime = useTransportCurrentTime()
+  const { isPlaying, isLooping, loopStart, loopEnd, togglePlay, stop, rewind, setLooping, setLoopPoints } =
     useTransport()
 
   const [bpm, setBpm] = useState(currentProject?.bpm || 120)

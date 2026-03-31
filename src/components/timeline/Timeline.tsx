@@ -4,13 +4,14 @@ import type React from "react"
 
 import { useRef, useEffect, useState } from "react"
 import { useProjectStore } from "@/stores/projectStore"
-import { useTransport } from "@/hooks/useTransport"
+import { useTransport, useTransportCurrentTime } from "@/hooks/useTransport"
 import { formatTime } from "@/utils/timeFormat"
 
 const Timeline = () => {
   const timelineRef = useRef<HTMLDivElement>(null)
   const { currentProject } = useProjectStore()
-  const { currentTime, seekTo } = useTransport()
+  const currentTime = useTransportCurrentTime()
+  const { seekTo } = useTransport()
   const [zoom, setZoom] = useState(100) // pixels per second
 
   const duration = currentProject?.duration || 60 // Default 60 seconds if no project

@@ -5,6 +5,17 @@ import { parseMidiFile } from "@/utils/midiImport";
 import { writeAudioAsset } from "@/utils/audioStorage";
 
 const createId = () => crypto.randomUUID();
+const TRACK_COLORS = [
+  "190 92% 56%",
+  "24 96% 63%",
+  "147 71% 56%",
+  "329 78% 63%",
+  "281 87% 68%",
+  "49 94% 61%",
+];
+
+const pickTrackColor = (trackCount: number) =>
+  TRACK_COLORS[trackCount % TRACK_COLORS.length];
 
 const touchProject = (project: Project): Project => ({
   ...project,
@@ -19,6 +30,7 @@ const createMidiTrack = (
   id: createId(),
   name: name || `MIDI Track ${trackCount + 1}`,
   type: "midi",
+  trackColor: pickTrackColor(trackCount),
   clips: [
     {
       id: createId(),
@@ -45,6 +57,7 @@ const createAudioTrack = (trackCount: number, name?: string): ProjectTrack => ({
   id: createId(),
   name: name || `Audio Track ${trackCount + 1}`,
   type: "audio",
+  trackColor: pickTrackColor(trackCount),
   clips: [],
   volume: 0.8,
   pan: 0,
@@ -120,6 +133,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
       id: createId(),
       name,
       bpm: 120,
+      timeSignatureNumerator: 4,
+      timeSignatureDenominator: 4,
       duration: 16,
       tracks: [],
       createdAt: Date.now(),
@@ -138,10 +153,20 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   loadProject: (project) => {
+    const normalizedProject: Project = {
+      ...project,
+      timeSignatureNumerator: project.timeSignatureNumerator ?? 4,
+      timeSignatureDenominator: project.timeSignatureDenominator ?? 4,
+      tracks: project.tracks.map((track, index) => ({
+        ...track,
+        trackColor: track.trackColor ?? pickTrackColor(index),
+      })),
+    };
+
     set({
-      currentProject: project,
-      currentProjectId: project.id,
-      selectedTrackId: project.tracks[0]?.id ?? null,
+      currentProject: normalizedProject,
+      currentProjectId: normalizedProject.id,
+      selectedTrackId: normalizedProject.tracks[0]?.id ?? null,
       selectedClipId: null,
       isProjectModified: false,
     });

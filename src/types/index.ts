@@ -39,6 +39,7 @@ export interface ProjectTrack {
   name: string;
   type: "midi" | "audio";
   clips: MidiClip[];
+  trackColor?: string;
   volume: number;
   pan: number;
   muted: boolean;
@@ -83,6 +84,8 @@ export interface Project {
   id: string;
   name: string;
   bpm: number;
+  timeSignatureNumerator?: number;
+  timeSignatureDenominator?: number;
   duration: number;
   tracks: ProjectTrack[];
   createdAt: number;

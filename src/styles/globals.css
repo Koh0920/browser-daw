@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body);
 }
 
 @layer utilities {
@@ -14,6 +14,9 @@ body {
 
 @layer base {
   :root {
+    --font-display: "Space Grotesk", "Avenir Next", "Segoe UI Variable Display", "Helvetica Neue", sans-serif;
+    --font-body: "Plus Jakarta Sans", "Avenir Next", "Segoe UI Variable Text", "Helvetica Neue", sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "IBM Plex Mono", monospace;
     --background: 0 0% 100%;
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
@@ -47,8 +50,31 @@ body {
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --daw-surface-0: 226 34% 6%;
+    --daw-surface-1: 225 31% 9%;
+    --daw-surface-2: 222 25% 13%;
+    --daw-surface-3: 221 20% 17%;
+    --daw-surface-4: 219 18% 22%;
+    --daw-panel-border: 219 20% 24%;
+    --daw-panel-border-strong: 192 77% 52%;
+    --daw-lcd-bg: 205 34% 8%;
+    --daw-lcd-fg: 182 87% 74%;
+    --daw-lcd-muted: 198 29% 58%;
+    --daw-accent: 190 92% 56%;
+    --daw-accent-soft: 189 68% 28%;
+    --daw-playhead: 351 94% 71%;
+    --daw-grid-strong: 219 26% 38%;
+    --daw-grid-soft: 220 19% 24%;
+    --daw-c-note: 202 42% 24%;
+    --daw-track-row-selected: 190 64% 18%;
+    --daw-track-row-hover: 218 24% 18%;
+    --daw-track-midi: 190 92% 56%;
+    --daw-track-audio: 24 96% 63%;
   }
   .dark {
+    --font-display: "Space Grotesk", "Avenir Next", "Segoe UI Variable Display", "Helvetica Neue", sans-serif;
+    --font-body: "Plus Jakarta Sans", "Avenir Next", "Segoe UI Variable Text", "Helvetica Neue", sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "IBM Plex Mono", monospace;
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
     --card: 0 0% 3.9%;
@@ -81,6 +107,26 @@ body {
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --daw-surface-0: 226 34% 6%;
+    --daw-surface-1: 225 31% 9%;
+    --daw-surface-2: 222 25% 13%;
+    --daw-surface-3: 221 20% 17%;
+    --daw-surface-4: 219 18% 22%;
+    --daw-panel-border: 219 20% 24%;
+    --daw-panel-border-strong: 192 77% 52%;
+    --daw-lcd-bg: 205 34% 8%;
+    --daw-lcd-fg: 182 87% 74%;
+    --daw-lcd-muted: 198 29% 58%;
+    --daw-accent: 190 92% 56%;
+    --daw-accent-soft: 189 68% 28%;
+    --daw-playhead: 351 94% 71%;
+    --daw-grid-strong: 219 26% 38%;
+    --daw-grid-soft: 220 19% 24%;
+    --daw-c-note: 202 42% 24%;
+    --daw-track-row-selected: 190 64% 18%;
+    --daw-track-row-hover: 218 24% 18%;
+    --daw-track-midi: 190 92% 56%;
+    --daw-track-audio: 24 96% 63%;
   }
 }
 
@@ -90,5 +136,45 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    background:
+      radial-gradient(circle at top, rgba(34, 211, 238, 0.08), transparent 26%),
+      linear-gradient(180deg, hsl(var(--daw-surface-1)), hsl(var(--daw-surface-0)) 45%);
+    min-height: 100vh;
+    letter-spacing: -0.01em;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .daw-panel-title {
+    color: hsl(var(--foreground) / 0.78);
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+
+  .daw-lcd {
+    background:
+      linear-gradient(180deg, hsl(var(--daw-surface-4) / 0.28), transparent 55%),
+      linear-gradient(180deg, hsl(var(--daw-lcd-bg)), hsl(218 36% 6%));
+    border: 1px solid hsl(var(--daw-panel-border) / 0.88);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 18px 38px rgba(0, 0, 0, 0.28);
+  }
+
+  .daw-lcd-readout {
+    color: hsl(var(--daw-lcd-fg));
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.08em;
   }
 }

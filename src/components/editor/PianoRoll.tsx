@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useRef, useEffect, useState } from "react"
 import { useProjectStore } from "@/stores/projectStore"
-import { useTransport } from "@/hooks/useTransport"
+import { useTransport, useTransportCurrentTime } from "@/hooks/useTransport"
 import type { ProjectTrack, MidiNote, MidiClip } from "@/types"
 
 interface PianoRollProps {
@@ -22,7 +22,8 @@ const PianoRoll = ({ track }: PianoRollProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const { currentProject, updateMidiClip, addMidiClip } = useProjectStore()
-  const { currentTime, isPlaying } = useTransport()
+  const currentTime = useTransportCurrentTime()
+  const { isPlaying } = useTransport()
 
   const [zoom, setZoom] = useState(100) // pixels per second
   const [selectedClip, setSelectedClip] = useState<MidiClip | null>(null)

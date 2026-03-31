@@ -8,6 +8,11 @@ const config: Config = {
   ],
   theme: {
   	extend: {
+			fontFamily: {
+				display: ['var(--font-display)'],
+				body: ['var(--font-body)'],
+				mono: ['var(--font-mono)']
+			},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -58,6 +63,15 @@ const config: Config = {
   				'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
+				},
+				daw: {
+					surface0: 'hsl(var(--daw-surface-0))',
+					surface1: 'hsl(var(--daw-surface-1))',
+					surface2: 'hsl(var(--daw-surface-2))',
+					surface3: 'hsl(var(--daw-surface-3))',
+					border: 'hsl(var(--daw-panel-border))',
+					accent: 'hsl(var(--daw-accent))',
+					playhead: 'hsl(var(--daw-playhead))'
   			}
   		},
   		borderRadius: {

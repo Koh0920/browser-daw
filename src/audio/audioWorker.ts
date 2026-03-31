@@ -1,5 +1,5 @@
 let timer: number | null = null
-const TICK_INTERVAL = 25 // ms
+const TICK_INTERVAL = 40 // ms
 
 self.onmessage = (e: MessageEvent) => {
   const { command } = e.data

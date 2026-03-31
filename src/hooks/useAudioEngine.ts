@@ -4,18 +4,32 @@ import {
   findNearestSampleZone,
   getInstrumentDefinition,
 } from "@/audio/instruments";
+import type { SampleZone } from "@/audio/instruments";
 import { useProjectStore } from "@/stores/projectStore";
+import {
+  emitTransportTime,
+  getTransportCurrentTime,
+  setTransportRenderTime,
+  useTransportStore,
+} from "@/stores/transportStore";
+import { recordAudioWorkerTick } from "@/utils/playbackDiagnostics";
 import { readAudioAsset } from "@/utils/audioStorage";
-import type { MidiClip } from "@/types";
+import type { MidiClip, MidiNote, ProjectTrack } from "@/types";
 import { useTransport } from "./useTransport";
 
-const LOOK_AHEAD_SECONDS = 0.2;
+const LOOK_AHEAD_SECONDS = 0.5;
 const MIN_NOTE_DURATION_SECONDS = 0.05;
 const SAMPLER_RELEASE_SECONDS = 1.35;
+const ENABLE_AUDIO_DEBUG = false;
+const TRANSPORT_SNAPSHOT_UPDATE_INTERVAL_SECONDS = 0.1;
 const AUDIO_DEBUG_PREFIX = "[AudioEngine]";
 // WorkerのTick間隔より少し長めにとることで、余裕を持ってスケジュールします
 
 const logAudioDebug = (label: string, payload?: unknown) => {
+  if (!ENABLE_AUDIO_DEBUG) {
+    return;
+  }
+
   void label;
   void payload;
   // if (payload === undefined) {
@@ -100,10 +114,30 @@ interface TrackNodeChain {
   panner: StereoPannerNode;
 }
 
+interface CompiledAudioClipEvent {
+  clip: MidiClip;
+  absoluteStartTime: number;
+  estimatedEndTime: number;
+}
+
+interface CompiledMidiNoteEvent {
+  clip: MidiClip;
+  note: MidiNote;
+  absoluteStartTime: number;
+  absoluteEndTime: number;
+  instrumentDefinition: ReturnType<typeof getInstrumentDefinition>;
+  selectedZone: SampleZone | null;
+}
+
+interface CompiledTrackSchedule {
+  track: ProjectTrack;
+  audioClipEvents: CompiledAudioClipEvent[];
+  midiNoteEvents: CompiledMidiNoteEvent[];
+}
+
 export const useAudioEngine = () => {
   const currentProject = useProjectStore((state) => state.currentProject);
   const {
-    currentTime,
     isMasterMuted,
     isPlaying,
     isLooping,
@@ -126,6 +160,10 @@ export const useAudioEngine = () => {
     Map<string, Promise<AudioBuffer | null>>
   >(new Map());
   const playbackSessionRef = useRef(0);
+  const trackScheduleCursorRef = useRef<
+    Map<string, { audioIndex: number; midiIndex: number }>
+  >(new Map());
+  const lastTransportSnapshotTimeRef = useRef<number | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const wasPlayingRef = useRef(false);
 
@@ -188,6 +226,24 @@ export const useAudioEngine = () => {
     return decodePromise;
   };
 
+  const preloadAudioBuffersForPlayback = async (context: AudioContext) => {
+    const preloadPromises: Array<Promise<AudioBuffer | null>> = [];
+
+    compiledTrackSchedules.forEach(({ audioClipEvents }) => {
+      audioClipEvents.forEach(({ clip }) => {
+        if (clip.audioData || clip.audioAssetPath) {
+          preloadPromises.push(getDecodedClipAudioBuffer(context, clip));
+        }
+      });
+    });
+
+    if (preloadPromises.length === 0) {
+      return;
+    }
+
+    await Promise.all(preloadPromises);
+  };
+
   const trackMixerState = useMemo(() => {
     if (!currentProject) return new Map();
     const hasSolo = currentProject.tracks.some((t) => t.solo);
@@ -201,6 +257,71 @@ export const useAudioEngine = () => {
     );
   }, [currentProject]);
 
+  const compiledTrackSchedules = useMemo<CompiledTrackSchedule[]>(() => {
+    if (!currentProject) {
+      return [];
+    }
+
+    return currentProject.tracks.map((track) => {
+      const audioClipEvents =
+        track.type === "audio"
+          ? [...track.clips]
+              .sort((left, right) => left.startTime - right.startTime)
+              .map((clip) => ({
+                clip,
+                absoluteStartTime: clip.startTime,
+                estimatedEndTime: clip.startTime + Math.max(clip.duration, 0),
+              }))
+          : [];
+
+      const instrumentDefinition =
+        track.type === "midi"
+          ? getInstrumentDefinition(track.instrument.patchId)
+          : null;
+
+      const midiNoteEvents =
+        track.type === "midi" && instrumentDefinition
+          ? track.clips
+              .flatMap((clip) =>
+                clip.notes.map((note) => ({
+                  clip,
+                  note,
+                  absoluteStartTime: clip.startTime + note.startTime,
+                  absoluteEndTime: clip.startTime + note.startTime + note.duration,
+                  instrumentDefinition,
+                  selectedZone:
+                    instrumentDefinition.type === "sampler" &&
+                    instrumentDefinition.zones?.length
+                      ? findNearestSampleZone(
+                          note.pitch,
+                          instrumentDefinition.zones,
+                        )
+                      : null,
+                })),
+              )
+              .sort(
+                (left, right) => left.absoluteStartTime - right.absoluteStartTime,
+              )
+          : [];
+
+      return {
+        track,
+        audioClipEvents,
+        midiNoteEvents,
+      };
+    });
+  }, [currentProject]);
+
+  useEffect(() => {
+    const nextCursors = new Map<string, { audioIndex: number; midiIndex: number }>();
+
+    compiledTrackSchedules.forEach(({ track }) => {
+      nextCursors.set(track.id, { audioIndex: 0, midiIndex: 0 });
+    });
+
+    trackScheduleCursorRef.current = nextCursors;
+  }, [compiledTrackSchedules, revision]);
+
   // AudioContext と Worker の初期化
   useEffect(() => {
     const context = new AudioContext();
@@ -208,9 +329,11 @@ export const useAudioEngine = () => {
     masterGain.gain.value = 0.7;
     masterGain.connect(context.destination);
 
-    logAudioDebug("init", {
-      audioContextState: context.state,
-    });
+    if (ENABLE_AUDIO_DEBUG) {
+      logAudioDebug("init", {
+        audioContextState: context.state,
+      });
+    }
 
     audioContextRef.current = context;
     masterGainRef.current = masterGain;
@@ -347,9 +470,10 @@ export const useAudioEngine = () => {
   // ★ 追加: シークや再生開始時に、マスタークロックの基準位置を記録
   useEffect(() => {
     if (audioContextRef.current) {
+      const sequenceTime = getTransportCurrentTime();
       lastSyncTimeRef.current = {
         audioTime: audioContextRef.current.currentTime,
-        sequenceTime: currentTime,
+        sequenceTime,
       };
     }
   }, [isPlaying, revision]);
@@ -412,11 +536,14 @@ export const useAudioEngine = () => {
       activeNodesRef.current.clear();
       scheduledNotesRef.current.clear();
       pendingSchedulesRef.current.clear();
+      lastTransportSnapshotTimeRef.current = null;
       return;
     }
 
     const handleTick = () => {
       if (!currentProject || !isPlaying) return;
+
+      recordAudioWorkerTick();
 
       const now = context.currentTime;
 
@@ -427,25 +554,68 @@ export const useAudioEngine = () => {
       const scheduleUntilWindow = absoluteCurrentTime + LOOK_AHEAD_SECONDS;
       const loopLength = loopEnd - loopStart;
 
-      logAudioDebug("tick", {
-        audioContextState: context.state,
-        audioTime: Number(now.toFixed(4)),
-        currentTime: Number(currentTime.toFixed(4)),
-        isPlaying,
-        loopEnd,
-        loopStart,
-        projectDuration: currentProject.duration,
-        revision,
-        scheduledNotes: scheduledNotesRef.current.size,
-        sequenceTime: Number(absoluteCurrentTime.toFixed(4)),
-      });
+      if (absoluteCurrentTime >= currentProject.duration) {
+        useTransportStore.getState().stop();
+        return;
+      }
 
-      currentProject.tracks.forEach((track) => {
+      setTransportRenderTime(absoluteCurrentTime);
+
+      const lastTransportSnapshotTime =
+        lastTransportSnapshotTimeRef.current ?? -Infinity;
+      if (
+        absoluteCurrentTime - lastTransportSnapshotTime >=
+        TRANSPORT_SNAPSHOT_UPDATE_INTERVAL_SECONDS
+      ) {
+        useTransportStore.getState().commitCurrentTime(absoluteCurrentTime);
+        emitTransportTime();
+        lastTransportSnapshotTimeRef.current = absoluteCurrentTime;
+      }
+
+      if (ENABLE_AUDIO_DEBUG) {
+        logAudioDebug("tick", {
+          audioContextState: context.state,
+          audioTime: Number(now.toFixed(4)),
+          currentTime: Number(getTransportCurrentTime().toFixed(4)),
+          isPlaying,
+          loopEnd,
+          loopStart,
+          projectDuration: currentProject.duration,
+          revision,
+          scheduledNotes: scheduledNotesRef.current.size,
+          sequenceTime: Number(absoluteCurrentTime.toFixed(4)),
+        });
+      }
+
+      for (const compiledTrack of compiledTrackSchedules) {
+        const { track } = compiledTrack;
         const trackChain = trackNodesRef.current.get(track.id);
-        if (!trackChain) return;
+        if (!trackChain) {
+          continue;
+        }
 
-        track.clips.forEach((clip) => {
-          if (track.type === "audio") {
+        const cursor =
+          trackScheduleCursorRef.current.get(track.id) ??
+          { audioIndex: 0, midiIndex: 0 };
+
+        if (track.type === "audio") {
+          let audioStartIndex = 0;
+
+          if (!isLooping || loopLength <= 0) {
+            while (
+              cursor.audioIndex < compiledTrack.audioClipEvents.length &&
+              compiledTrack.audioClipEvents[cursor.audioIndex].estimatedEndTime <=
+                absoluteCurrentTime
+            ) {
+              cursor.audioIndex += 1;
+            }
+
+            audioStartIndex = cursor.audioIndex;
+          }
+
+          for (let audioIndex = audioStartIndex; audioIndex < compiledTrack.audioClipEvents.length; audioIndex += 1) {
+            const audioEvent = compiledTrack.audioClipEvents[audioIndex];
+            const clip = audioEvent.clip;
             const scheduleAudioClipInstance = async (
               monotonicStartTime: number,
               iteration: number,
@@ -528,7 +698,15 @@ export const useAudioEngine = () => {
               }
             };
 
-            const absoluteStartTime = clip.startTime;
+            const absoluteStartTime = audioEvent.absoluteStartTime;
+
+            if (!isLooping && absoluteStartTime > scheduleUntilWindow) {
+              break;
+            }
+
+            if (isLooping && loopLength > 0 && absoluteStartTime >= loopEnd) {
+              break;
+            }
 
             if (!isLooping || loopLength <= 0) {
               void scheduleAudioClipInstance(absoluteStartTime, 0);
@@ -561,127 +739,148 @@ export const useAudioEngine = () => {
               }
             }
 
-            return;
           }
 
-          clip.notes.forEach((note) => {
-            const absoluteStartTime = clip.startTime + note.startTime;
-            const absoluteEndTime = absoluteStartTime + note.duration;
+          continue;
+        }
 
-            const scheduleInstance = (
-              monotonicStartTime: number,
-              iteration: number,
-            ) => {
-              if (
-                absoluteEndTime <= absoluteCurrentTime ||
-                monotonicStartTime > scheduleUntilWindow
-              )
-                return;
+        let midiStartIndex = 0;
 
-              const scheduleKey = `${track.id}:${clip.id}:${note.id}:${revision}:${iteration}`;
-              if (scheduledNotesRef.current.has(scheduleKey)) return;
+        if (!isLooping || loopLength <= 0) {
+          while (
+            cursor.midiIndex < compiledTrack.midiNoteEvents.length &&
+            compiledTrack.midiNoteEvents[cursor.midiIndex].absoluteEndTime <=
+              absoluteCurrentTime
+          ) {
+            cursor.midiIndex += 1;
+          }
 
-              const playbackOffset = Math.max(
-                0,
-                absoluteCurrentTime - monotonicStartTime,
-              );
-              const remainingDuration = Math.max(
-                MIN_NOTE_DURATION_SECONDS,
-                note.duration - playbackOffset,
-              );
-              const adjustedStartTime = Math.max(
-                monotonicStartTime,
-                absoluteCurrentTime,
+          midiStartIndex = cursor.midiIndex;
+        }
+
+        for (let midiIndex = midiStartIndex; midiIndex < compiledTrack.midiNoteEvents.length; midiIndex += 1) {
+          const noteEvent = compiledTrack.midiNoteEvents[midiIndex];
+          const {
+            absoluteEndTime,
+            absoluteStartTime,
+            clip,
+            instrumentDefinition,
+            note,
+            selectedZone,
+          } = noteEvent;
+
+          if (!isLooping && absoluteStartTime > scheduleUntilWindow) {
+            break;
+          }
+
+          if (isLooping && loopLength > 0 && absoluteStartTime >= loopEnd) {
+            break;
+          }
+
+          const scheduleInstance = (
+            monotonicStartTime: number,
+            iteration: number,
+          ) => {
+            if (
+              absoluteEndTime <= absoluteCurrentTime ||
+              monotonicStartTime > scheduleUntilWindow
+            )
+              return;
+
+            const scheduleKey = `${track.id}:${clip.id}:${note.id}:${revision}:${iteration}`;
+            if (scheduledNotesRef.current.has(scheduleKey)) return;
+
+            const playbackOffset = Math.max(
+              0,
+              absoluteCurrentTime - monotonicStartTime,
+            );
+            const remainingDuration = Math.max(
+              MIN_NOTE_DURATION_SECONDS,
+              note.duration - playbackOffset,
+            );
+            const adjustedStartTime = Math.max(
+              monotonicStartTime,
+              absoluteCurrentTime,
+            );
+
+            const startAt =
+              lastSyncTimeRef.current.audioTime +
+              (adjustedStartTime - lastSyncTimeRef.current.sequenceTime);
+            const stopAt = Math.max(
+              startAt + MIN_NOTE_DURATION_SECONDS,
+              startAt + remainingDuration,
+            );
+            const velocity = getNormalizedVelocity(note.velocity);
+            const samplerBuffer = selectedZone
+              ? instrumentCache.get(selectedZone.url)
+              : null;
+
+            if (selectedZone && !samplerBuffer) {
+              void loadInstrumentSample(context, selectedZone.url);
+            }
+
+            if (selectedZone && samplerBuffer) {
+              const source = context.createBufferSource();
+              const noteGain = context.createGain();
+              const releaseSeconds = instrumentDefinition.oneShot
+                ? Math.min(0.45, samplerBuffer.duration)
+                : SAMPLER_RELEASE_SECONDS;
+              const sourceOffset = instrumentDefinition.oneShot
+                ? 0
+                : Math.min(
+                    playbackOffset,
+                    Math.max(0, samplerBuffer.duration - 0.01),
+                  );
+              const samplerStopAt = instrumentDefinition.oneShot
+                ? startAt + Math.min(samplerBuffer.duration, 2)
+                : stopAt + releaseSeconds;
+              const holdUntil = instrumentDefinition.oneShot
+                ? Math.min(startAt + 0.03, samplerStopAt)
+                : Math.max(startAt + 0.012, stopAt - 0.18);
+
+              source.buffer = samplerBuffer;
+              source.playbackRate.value =
+                instrumentDefinition.pitchTracking === false
+                  ? 1
+                  : Math.pow(2, (note.pitch - selectedZone.pitch) / 12);
+
+              noteGain.gain.setValueAtTime(0, startAt);
+              noteGain.gain.linearRampToValueAtTime(
+                velocity,
+                startAt + (instrumentDefinition.oneShot ? 0.002 : 0.004),
               );
 
-              const startAt =
-                lastSyncTimeRef.current.audioTime +
-                (adjustedStartTime - lastSyncTimeRef.current.sequenceTime);
-              const stopAt = Math.max(
-                startAt + MIN_NOTE_DURATION_SECONDS,
-                startAt + remainingDuration,
-              );
-              const velocity = getNormalizedVelocity(note.velocity);
-              const instrumentDefinition = getInstrumentDefinition(
-                track.instrument.patchId,
-              );
-              const selectedZone =
-                instrumentDefinition.type === "sampler" &&
-                instrumentDefinition.zones?.length
-                  ? findNearestSampleZone(
-                      note.pitch,
-                      instrumentDefinition.zones,
-                    )
-                  : null;
-              const samplerBuffer = selectedZone
-                ? instrumentCache.get(selectedZone.url)
-                : null;
-
-              if (selectedZone && !samplerBuffer) {
-                void loadInstrumentSample(context, selectedZone.url);
+              if (instrumentDefinition.oneShot) {
+                noteGain.gain.exponentialRampToValueAtTime(
+                  Math.max(0.12, velocity * 0.55),
+                  holdUntil,
+                );
+                noteGain.gain.exponentialRampToValueAtTime(
+                  0.001,
+                  samplerStopAt,
+                );
+              } else {
+                noteGain.gain.setValueAtTime(velocity, holdUntil);
+                noteGain.gain.exponentialRampToValueAtTime(
+                  Math.max(0.05, velocity * 0.55),
+                  stopAt + releaseSeconds * 0.28,
+                );
+                noteGain.gain.exponentialRampToValueAtTime(
+                  0.001,
+                  samplerStopAt,
+                );
               }
 
-              if (selectedZone && samplerBuffer) {
-                const source = context.createBufferSource();
-                const noteGain = context.createGain();
-                const releaseSeconds = instrumentDefinition.oneShot
-                  ? Math.min(0.45, samplerBuffer.duration)
-                  : SAMPLER_RELEASE_SECONDS;
-                const sourceOffset = instrumentDefinition.oneShot
-                  ? 0
-                  : Math.min(
-                      playbackOffset,
-                      Math.max(0, samplerBuffer.duration - 0.01),
-                    );
-                const samplerStopAt = instrumentDefinition.oneShot
-                  ? startAt + Math.min(samplerBuffer.duration, 2)
-                  : stopAt + releaseSeconds;
-                const holdUntil = instrumentDefinition.oneShot
-                  ? Math.min(startAt + 0.03, samplerStopAt)
-                  : Math.max(startAt + 0.012, stopAt - 0.18);
+              source.connect(noteGain);
+              noteGain.connect(trackChain.gain);
 
-                source.buffer = samplerBuffer;
-                source.playbackRate.value =
-                  instrumentDefinition.pitchTracking === false
-                    ? 1
-                    : Math.pow(2, (note.pitch - selectedZone.pitch) / 12);
+              source.start(startAt, sourceOffset);
+              source.stop(samplerStopAt);
 
-                noteGain.gain.setValueAtTime(0, startAt);
-                noteGain.gain.linearRampToValueAtTime(
-                  velocity,
-                  startAt + (instrumentDefinition.oneShot ? 0.002 : 0.004),
-                );
+              activeNodesRef.current.add(source);
+              scheduledNotesRef.current.add(scheduleKey);
 
-                if (instrumentDefinition.oneShot) {
-                  noteGain.gain.exponentialRampToValueAtTime(
-                    Math.max(0.12, velocity * 0.55),
-                    holdUntil,
-                  );
-                  noteGain.gain.exponentialRampToValueAtTime(
-                    0.001,
-                    samplerStopAt,
-                  );
-                } else {
-                  noteGain.gain.setValueAtTime(velocity, holdUntil);
-                  noteGain.gain.exponentialRampToValueAtTime(
-                    Math.max(0.05, velocity * 0.55),
-                    stopAt + releaseSeconds * 0.28,
-                  );
-                  noteGain.gain.exponentialRampToValueAtTime(
-                    0.001,
-                    samplerStopAt,
-                  );
-                }
-
-                source.connect(noteGain);
-                noteGain.connect(trackChain.gain);
-
-                source.start(startAt, sourceOffset);
-                source.stop(samplerStopAt);
-
-                activeNodesRef.current.add(source);
-                scheduledNotesRef.current.add(scheduleKey);
-
+              if (ENABLE_AUDIO_DEBUG) {
                 logAudioDebug("scheduled-sampler-note", {
                   adjustedStartTime: Number(adjustedStartTime.toFixed(4)),
                   noteId: note.id,
@@ -691,38 +890,40 @@ export const useAudioEngine = () => {
                   scheduleKey,
                   trackId: track.id,
                 });
-
-                source.onended = () => {
-                  activeNodesRef.current.delete(source);
-                  source.disconnect();
-                  noteGain.disconnect();
-                };
-                return;
               }
 
-              const osc = context.createOscillator();
-              const noteGain = context.createGain();
+              source.onended = () => {
+                activeNodesRef.current.delete(source);
+                source.disconnect();
+                noteGain.disconnect();
+              };
+              return;
+            }
 
-              osc.type = "triangle";
-              osc.frequency.value = midiNoteToFrequency(note.pitch);
+            const osc = context.createOscillator();
+            const noteGain = context.createGain();
 
-              noteGain.gain.setValueAtTime(0, startAt);
-              noteGain.gain.linearRampToValueAtTime(velocity, startAt + 0.01);
-              noteGain.gain.setValueAtTime(
-                velocity,
-                Math.max(startAt + 0.01, stopAt - 0.05),
-              );
-              noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt);
+            osc.type = "triangle";
+            osc.frequency.value = midiNoteToFrequency(note.pitch);
 
-              osc.connect(noteGain);
-              noteGain.connect(trackChain.gain);
+            noteGain.gain.setValueAtTime(0, startAt);
+            noteGain.gain.linearRampToValueAtTime(velocity, startAt + 0.01);
+            noteGain.gain.setValueAtTime(
+              velocity,
+              Math.max(startAt + 0.01, stopAt - 0.05),
+            );
+            noteGain.gain.exponentialRampToValueAtTime(0.001, stopAt);
 
-              osc.start(startAt);
-              osc.stop(stopAt);
+            osc.connect(noteGain);
+            noteGain.connect(trackChain.gain);
 
-              activeNodesRef.current.add(osc);
-              scheduledNotesRef.current.add(scheduleKey);
+            osc.start(startAt);
+            osc.stop(stopAt);
 
+            activeNodesRef.current.add(osc);
+            scheduledNotesRef.current.add(scheduleKey);
+
+            if (ENABLE_AUDIO_DEBUG) {
               logAudioDebug("scheduled-osc-note", {
                 adjustedStartTime: Number(adjustedStartTime.toFixed(4)),
                 noteId: note.id,
@@ -731,44 +932,44 @@ export const useAudioEngine = () => {
                 scheduleKey,
                 trackId: track.id,
               });
+            }
 
-              osc.onended = () => {
-                activeNodesRef.current.delete(osc);
-                osc.disconnect();
-                noteGain.disconnect();
-              };
+            osc.onended = () => {
+              activeNodesRef.current.delete(osc);
+              osc.disconnect();
+              noteGain.disconnect();
             };
+          };
 
-            if (!isLooping || loopLength <= 0) {
+          if (!isLooping || loopLength <= 0) {
+            scheduleInstance(absoluteStartTime, 0);
+          } else {
+            if (absoluteStartTime < loopStart) {
               scheduleInstance(absoluteStartTime, 0);
-            } else {
-              if (absoluteStartTime < loopStart) {
-                scheduleInstance(absoluteStartTime, 0);
-              } else if (
-                absoluteStartTime >= loopStart &&
-                absoluteStartTime < loopEnd
-              ) {
-                const minIter = Math.max(
-                  0,
-                  Math.floor(
-                    (absoluteCurrentTime - absoluteStartTime) / loopLength,
-                  ),
-                );
-                const maxIter = Math.max(
-                  0,
-                  Math.ceil(
-                    (scheduleUntilWindow - absoluteStartTime) / loopLength,
-                  ),
-                );
+            } else if (
+              absoluteStartTime >= loopStart &&
+              absoluteStartTime < loopEnd
+            ) {
+              const minIter = Math.max(
+                0,
+                Math.floor(
+                  (absoluteCurrentTime - absoluteStartTime) / loopLength,
+                ),
+              );
+              const maxIter = Math.max(
+                0,
+                Math.ceil(
+                  (scheduleUntilWindow - absoluteStartTime) / loopLength,
+                ),
+              );
 
-                for (let i = minIter; i <= maxIter; i++) {
-                  scheduleInstance(absoluteStartTime + i * loopLength, i);
-                }
+              for (let i = minIter; i <= maxIter; i++) {
+                scheduleInstance(absoluteStartTime + i * loopLength, i);
               }
             }
-          });
-        });
-      });
+          }
+        }
+      }
     };
 
     const onMessage = (e: MessageEvent) => {
@@ -782,24 +983,33 @@ export const useAudioEngine = () => {
         isCancelled ||
         playbackSession !== playbackSessionRef.current
       ) {
-        logAudioDebug("start-playback-aborted", {
-          audioContextState: context.state,
-          didResume,
-          isCancelled,
-          playbackSession,
-          sessionRef: playbackSessionRef.current,
-        });
+        if (ENABLE_AUDIO_DEBUG) {
+          logAudioDebug("start-playback-aborted", {
+            audioContextState: context.state,
+            didResume,
+            isCancelled,
+            playbackSession,
+            sessionRef: playbackSessionRef.current,
+          });
+        }
         return;
       }
 
-      logAudioDebug("start-playback", {
-        audioContextState: context.state,
-        currentTime: Number(currentTime.toFixed(4)),
-        isPlaying,
-        projectId: currentProject?.id,
-        revision,
-        trackCount: currentProject?.tracks.length ?? 0,
-      });
+      await preloadAudioBuffersForPlayback(context);
+      if (isCancelled || playbackSession !== playbackSessionRef.current) {
+        return;
+      }
+
+      if (ENABLE_AUDIO_DEBUG) {
+        logAudioDebug("start-playback", {
+          audioContextState: context.state,
+          currentTime: Number(getTransportCurrentTime().toFixed(4)),
+          isPlaying,
+          projectId: currentProject?.id,
+          revision,
+          trackCount: currentProject?.tracks.length ?? 0,
+        });
+      }
 
       worker.postMessage({ command: "start" });
       worker.addEventListener("message", onMessage);

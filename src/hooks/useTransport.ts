@@ -1,59 +1,56 @@
-import { useEffect, useRef } from "react";
 import { useProjectStore } from "@/stores/projectStore";
-import { useTransportStore } from "@/stores/transportStore";
+import {
+  useTransportStore,
+} from "@/stores/transportStore";
+
+export const useTransportCurrentTime = () =>
+  useTransportStore((state) => state.currentTime);
 
 export const useTransport = () => {
-  const currentProject = useProjectStore((state) => state.currentProject);
-  const store = useTransportStore();
-  const animationFrameRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!store.isPlaying) {
-      if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-      lastTimeRef.current = null;
-      return;
-    }
-
-    const loop = (frameTime: number) => {
-      const previousFrameTime = lastTimeRef.current ?? frameTime;
-      const deltaSeconds = (frameTime - previousFrameTime) / 1000;
-      lastTimeRef.current = frameTime;
-
-      const projectDuration = currentProject?.duration ?? Infinity;
-      let nextTime = store.currentTime + deltaSeconds;
-
-      if (store.isLoopEnabled && nextTime >= store.loopEnd) {
-        nextTime = store.loopStart + (nextTime - store.loopEnd);
-      }
-
-      if (nextTime >= projectDuration) {
-        store.stop();
-        return;
-      }
-
-      store.setCurrentTime(nextTime);
-      animationFrameRef.current = requestAnimationFrame(loop);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(loop);
-
-    return () => {
-      if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    };
-  }, [currentProject?.duration, store]);
+  useProjectStore((state) => state.currentProject);
+  const isLoopEnabled = useTransportStore((state) => state.isLoopEnabled);
+  const isMasterMuted = useTransportStore((state) => state.isMasterMuted);
+  const isPlaying = useTransportStore((state) => state.isPlaying);
+  const loopEnd = useTransportStore((state) => state.loopEnd);
+  const loopStart = useTransportStore((state) => state.loopStart);
+  const masterVolume = useTransportStore((state) => state.masterVolume);
+  const revision = useTransportStore((state) => state.revision);
+  const play = useTransportStore((state) => state.play);
+  const pause = useTransportStore((state) => state.pause);
+  const rewind = useTransportStore((state) => state.rewind);
+  const seek = useTransportStore((state) => state.seek);
+  const setCurrentTime = useTransportStore((state) => state.setCurrentTime);
+  const setLoopEnabled = useTransportStore((state) => state.setLoopEnabled);
+  const setLoopPoints = useTransportStore((state) => state.setLoopPoints);
+  const setMasterMuted = useTransportStore((state) => state.setMasterMuted);
+  const setMasterVolume = useTransportStore((state) => state.setMasterVolume);
+  const stop = useTransportStore((state) => state.stop);
+  const toggleMasterMute = useTransportStore((state) => state.toggleMasterMute);
+  const togglePlayback = useTransportStore((state) => state.togglePlayback);
 
   return {
-    ...store,
-    isLooping: store.isLoopEnabled,
-    togglePlay: store.togglePlayback,
-    seekTo: store.seek,
-    setLooping: store.setLoopEnabled,
+    isLoopEnabled,
+    isMasterMuted,
+    isPlaying,
+    loopEnd,
+    loopStart,
+    masterVolume,
+    play,
+    pause,
+    rewind,
+    revision,
+    seek,
+    setCurrentTime,
+    setLoopEnabled,
+    setLoopPoints,
+    setMasterMuted,
+    setMasterVolume,
+    stop,
+    toggleMasterMute,
+    togglePlayback,
+    isLooping: isLoopEnabled,
+    togglePlay: togglePlayback,
+    seekTo: seek,
+    setLooping: setLoopEnabled,
   };
 };

@@ -2,7 +2,7 @@
 
 import { useRef, useEffect } from "react"
 import { useProjectStore } from "@/stores/projectStore"
-import { useTransport } from "@/hooks/useTransport"
+import { useTransportCurrentTime } from "@/hooks/useTransport"
 import type { AudioTrack, AudioClip } from "@/types"
 
 interface AudioClipViewProps {
@@ -13,7 +13,7 @@ interface AudioClipViewProps {
 const AudioClipView = ({ track, readOnly = false }: AudioClipViewProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { currentProject } = useProjectStore()
-  const { currentTime } = useTransport()
+  const currentTime = useTransportCurrentTime()
   const zoom = 100 // pixels per second
 
   const duration = currentProject?.duration || 60
