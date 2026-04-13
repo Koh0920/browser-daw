@@ -1,8 +1,7 @@
 import { Midi } from "@tonejs/midi"
 import { createDefaultTrackInstrument } from "@/projects/projectSchema"
 import type { ImportedMidiProject, MidiClip, MidiNote, MidiTrack } from "@/types"
-
-const createId = () => crypto.randomUUID()
+import { createId } from "@/utils/id"
 
 export async function parseMidiFile(file: File): Promise<ImportedMidiProject> {
   const buffer = await file.arrayBuffer()

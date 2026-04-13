@@ -5,8 +5,7 @@ import type {
   ProjectTrack,
 } from "@/types";
 import { analyzeAudioData } from "@/utils/audioAnalysis";
-
-const createId = () => crypto.randomUUID();
+import { createId } from "@/utils/id";
 
 const getFileNameWithoutExtension = (fileName: string) => {
   return fileName.replace(/\.[^.]+$/, "") || "Imported AAF";

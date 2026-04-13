@@ -18,8 +18,7 @@ import {
 import { analyzeAudioData } from "@/utils/audioAnalysis";
 import { parseMidiFile } from "@/utils/midiImport";
 import { writeAudioAsset } from "@/utils/audioStorage";
-
-const createId = () => crypto.randomUUID();
+import { createId } from "@/utils/id";
 const TRACK_COLORS = [
   "190 92% 56%",
   "24 96% 63%",

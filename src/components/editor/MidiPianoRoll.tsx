@@ -18,6 +18,7 @@ import {
 } from "@/components/editor/midiPianoRollInteractions";
 import type { GridDivision } from "@/utils/grid";
 import { getGridStepSeconds } from "@/utils/grid";
+import { createId } from "@/utils/id";
 
 const ROW_HEIGHT = 20;
 const PIANO_WIDTH = 72;
@@ -287,7 +288,7 @@ const MidiPianoRoll = ({
       bpm,
       gridDivision,
       beatDuration,
-      noteId: crypto.randomUUID(),
+      noteId: createId(),
     });
 
     replaceClipNotes(
@@ -340,7 +341,7 @@ const MidiPianoRoll = ({
           notes: clip.notes,
           noteId,
           splitTime: splitOffset,
-          nextNoteId: crypto.randomUUID(),
+          nextNoteId: createId(),
         }),
       );
       setSelectedNoteId(noteId);

@@ -8,10 +8,9 @@ import type {
   ProjectTrack,
 } from "@/types";
 import { analyzeAudioData } from "@/utils/audioAnalysis";
+import { createId } from "@/utils/id";
 
 type DawprojectArchive = Record<string, Uint8Array>;
-
-const createId = () => crypto.randomUUID();
 
 const toArrayBuffer = (value: Uint8Array) => {
   const copy = new Uint8Array(value.byteLength);

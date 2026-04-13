@@ -1,5 +1,6 @@
 import { getInstrumentParameterDefaults } from "@/audio/instruments";
 import type { InstrumentConfig } from "@/types";
+import { createId } from "@/utils/id";
 
 const STORAGE_KEY = "browser-daw.instrument-presets.v1";
 
@@ -93,7 +94,7 @@ export const saveInstrumentPreset = (
         updatedAt: timestamp,
       }
     : {
-        id: crypto.randomUUID(),
+        id: createId(),
         patchId: resolvedPatchId,
         name: sanitizedName,
         parameters: { ...parameters },
