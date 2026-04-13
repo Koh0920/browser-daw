@@ -185,33 +185,30 @@ export default function InstrumentParameterEditor({
   };
 
   return (
-    <div className="space-y-3 rounded-[22px] border border-white/8 bg-black/18 p-4">
+    <div className="space-y-2 border-t border-white/8 pt-2">
+      {/* Description */}
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-            {definition.ui?.category ?? definition.engineType}
-          </h4>
-          <p className="mt-1 text-xs leading-5 text-slate-300/90">
-            {definition.ui?.description ?? "Shape the instrument response for playback, live input, and export."}
-          </p>
-        </div>
-        <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
-          {definition.engineType}
-        </div>
+        <p className="text-[10px] text-slate-400/80">
+          {definition.ui?.description ?? "Shape the instrument response for playback, live input, and export."}
+        </p>
+        <span className="shrink-0 rounded border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-200">
+          {definition.ui?.category ?? definition.engineType}
+        </span>
       </div>
 
-      <div className="rounded-2xl border border-white/7 bg-white/[0.03] p-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
+      {/* Preset */}
+      <div className="border border-white/8 bg-white/3 p-3">
+        <div className="mb-2 flex items-center justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Preset
           </span>
-          <span className="font-mono text-[11px] text-slate-300/80">
+          <span className="font-mono text-[10px] text-slate-500">
             {customPresets.length} custom
           </span>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-2">
           <Select value={selectedPresetId} onValueChange={applyPreset}>
-            <SelectTrigger className="h-10 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
+            <SelectTrigger className="h-8 rounded border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
               <SelectValue placeholder="Choose a preset" />
             </SelectTrigger>
             <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
@@ -219,7 +216,7 @@ export default function InstrumentParameterEditor({
                 <SelectItem
                   key={preset.id}
                   value={preset.id}
-                  className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                  className="rounded py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
                 >
                   {preset.name}
                 </SelectItem>
@@ -231,15 +228,15 @@ export default function InstrumentParameterEditor({
             <Input
               value={presetName}
               onChange={(event) => setPresetName(event.target.value)}
-              placeholder="Save current settings as..."
-              className="h-10 rounded-2xl border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500 focus-visible:ring-cyan-300/70"
+              placeholder="Save current as..."
+              className="h-8 rounded border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500 focus-visible:ring-cyan-300/70"
               maxLength={48}
             />
             <Button
               type="button"
               onClick={handleSavePreset}
               disabled={!presetName.trim()}
-              className="h-10 rounded-2xl border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(25,197,255,0.22),rgba(14,165,233,0.12))] px-4 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-50 hover:bg-[linear-gradient(135deg,rgba(25,197,255,0.28),rgba(14,165,233,0.18))]"
+              className="h-8 rounded border border-cyan-300/20 bg-cyan-500/15 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-50 hover:bg-cyan-500/22 disabled:opacity-40"
             >
               Save
             </Button>
@@ -247,47 +244,49 @@ export default function InstrumentParameterEditor({
         </div>
       </div>
 
+      {/* Note Map */}
       {definition.engineType === "drum-sampler" && definition.zones?.length ? (
-        <div className="rounded-2xl border border-white/7 bg-white/[0.03] p-3">
-          <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="border border-white/8 bg-white/3 p-3">
+          <div className="mb-2 flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
               Note Map
             </span>
-            <span className="font-mono text-[11px] text-slate-300/80">
+            <span className="font-mono text-[10px] text-slate-500">
               {definition.zones.length} zones
             </span>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1">
             {definition.zones.map((zone) => (
               <div
                 key={`${zone.url}:${zone.pitch}:${zone.minPitch ?? zone.pitch}`}
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-white/6 bg-black/18 px-3 py-2"
+                className="flex items-center justify-between border border-white/8 bg-white/3 px-3 py-1.5"
               >
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">
+                  <p className="text-xs font-semibold text-slate-100">
                     {zone.label ?? getMidiNoteLabel(zone.pitch)}
-                  </div>
-                  <div className="text-[11px] text-slate-400">
+                  </p>
+                  <p className="text-[10px] text-slate-500">
                     {getZoneRangeLabel(zone)}
-                  </div>
+                  </p>
                 </div>
-                <div className="rounded-full border border-white/8 bg-white/5 px-2.5 py-1 font-mono text-[11px] text-cyan-100">
+                <span className="rounded border border-white/8 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-cyan-100">
                   {getMidiNoteLabel(zone.pitch)}
-                </div>
+                </span>
               </div>
             ))}
           </div>
         </div>
       ) : null}
 
-      <div className="space-y-3">
+      {/* Parameters */}
+      <div className="space-y-1">
         {parameterSchema.map((parameter) => {
           const value = getParameterValue(definition, instrument, parameter);
 
           return (
             <div
               key={parameter.id}
-              className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-3"
+              className="border border-white/8 bg-white/3 px-3 py-2"
             >
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -322,7 +321,7 @@ export default function InstrumentParameterEditor({
                     updateInstrumentParameter(parameter.id, nextValue);
                   }}
                 >
-                  <SelectTrigger className="h-10 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
+                  <SelectTrigger className="h-8 rounded border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
                     <SelectValue placeholder={`Select ${parameter.label}`} />
                   </SelectTrigger>
                   <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
@@ -330,7 +329,7 @@ export default function InstrumentParameterEditor({
                       <SelectItem
                         key={option.value}
                         value={option.value}
-                        className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                        className="rounded py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
                       >
                         {option.label}
                       </SelectItem>

@@ -12,6 +12,7 @@ import {
   ArrowLeftRight,
   Download,
   FileUp,
+  Keyboard,
   MousePointer2,
   Plus,
   Save,
@@ -90,6 +91,7 @@ import type {
 } from "@/types";
 import { dispatchLiveMidiCommand } from "@/utils/liveMidiController";
 import { GRID_DIVISIONS, type GridDivision } from "@/utils/grid";
+import { createId } from "@/utils/id";
 
 type ExportTarget = "master" | "stems" | "dawproject";
 
@@ -192,7 +194,7 @@ const HeaderActionButton = forwardRef<
     <button
       ref={ref}
       type={type}
-      className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border transition-all active:scale-95 ${active ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100" : "border-white/8 bg-white/5 text-slate-300 hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100"}${className ? ` ${className}` : ""}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded border transition-all active:scale-95 ${active ? "border-cyan-400/45 bg-cyan-400/12 text-cyan-100" : "border-white/8 bg-white/5 text-slate-300 hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-100"}${className ? ` ${className}` : ""}`}
       aria-label={label}
       title={label}
       {...props}
@@ -486,7 +488,7 @@ const ProjectPage = () => {
     );
 
     pendingRecordedNotesRef.current.push({
-      id: crypto.randomUUID(),
+      id: createId(),
       pitch: activeNote.pitch,
       startTime: relativeStart,
       duration,
@@ -1041,8 +1043,8 @@ const ProjectPage = () => {
 
   if (!currentProject) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-100">
-        <div className="flex flex-col items-center justify-center space-y-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-8 shadow-xl">
+      <div className="flex min-h-screen items-center justify-center bg-[hsl(var(--daw-surface-0))] px-6 text-slate-100">
+        <div className="flex flex-col items-center justify-center space-y-4 rounded border border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-surface-2))] p-8">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-500 border-t-transparent" />
           <div className="text-center">
             <p className="font-medium text-slate-200">Loading project...</p>
@@ -1065,146 +1067,144 @@ const ProjectPage = () => {
       onDragLeave={handleFileDragLeave}
       onDrop={handleFileDrop}
     >
-      <header className="z-10 grid min-h-[88px] shrink-0 grid-cols-[minmax(260px,1fr)_minmax(360px,560px)_minmax(280px,1fr)] items-center gap-4 border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(17,22,34,0.96),rgba(9,12,20,0.94))] px-4 py-3 backdrop-blur-md">
-        <div className="flex min-w-0 items-center gap-4">
+      <header className="z-10 flex h-14 shrink-0 items-center gap-3 border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(17,22,34,0.96),rgba(9,12,20,0.94))] px-3 backdrop-blur-md">
+        {/* Left: Back + project name + tools */}
+        <div className="flex min-w-0 shrink-0 items-center gap-3">
           <Link
             to="/"
-            className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/6 bg-white/5 text-slate-300 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-cyan-100"
+            className="group flex h-8 w-8 shrink-0 items-center justify-center rounded border border-white/6 bg-white/5 text-slate-300 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-cyan-100"
             title="Back to projects"
           >
-            <ArrowLeft className="h-5 w-5 transition-transform group-hover:-translate-x-0.5" />
+            <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
           </Link>
 
-          <div className="min-w-0 space-y-2">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-slate-500">
-                Browser DAW Session
-              </p>
-              <h1 className="truncate font-display text-xl font-semibold tracking-[-0.03em] text-slate-50">
-                {currentProject.name}
-              </h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {TOOL_OPTIONS.map((tool) => {
-                const isActive = tool.id === activeTool;
-                const Icon = tool.icon;
-                return (
-                  <button
-                    key={tool.id}
-                    type="button"
-                    className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-[11px] font-semibold tracking-[0.14em] transition-all ${isActive ? "border-cyan-400/50 bg-cyan-400/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.12)]" : "border-white/8 bg-white/5 text-slate-400 hover:border-white/14 hover:bg-white/10 hover:text-slate-200"}`}
-                    onClick={() => setActiveTool(tool.id)}
-                    title={tool.hint}
-                    aria-pressed={isActive}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {tool.label}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="hidden min-w-0 lg:block">
+            <p className="text-[9px] font-bold uppercase tracking-[0.26em] text-slate-500 leading-none mb-0.5">
+              Browser DAW
+            </p>
+            <h1 className="truncate text-sm font-semibold tracking-tight text-slate-100 leading-none">
+              {currentProject.name}
+            </h1>
+          </div>
+
+          <div className="mx-1 h-5 w-px bg-white/10" />
+
+          <div className="flex items-center gap-1 border border-white/8 bg-white/5 p-1">
+            {TOOL_OPTIONS.map((tool) => {
+              const isActive = tool.id === activeTool;
+              const Icon = tool.icon;
+              return (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className={`inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-[10px] font-semibold tracking-[0.1em] transition-all ${isActive ? "bg-cyan-400/15 text-cyan-100" : "text-slate-400 hover:bg-white/8 hover:text-slate-200"}`}
+                  onClick={() => setActiveTool(tool.id)}
+                  title={tool.hint}
+                  aria-pressed={isActive}
+                >
+                  <Icon className="h-3 w-3" />
+                  {tool.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="daw-lcd rounded-[24px] px-4 py-3">
-          <div className="grid grid-cols-4 gap-3">
-            <div className="rounded-2xl border border-white/5 bg-black/20 px-3 py-2">
-              <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
-                Tempo
-              </p>
+        {/* Center: Unified LCD */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex h-10 items-stretch border border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-lcd-bg))] divide-x divide-[hsl(var(--daw-panel-border))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <div className="flex flex-col justify-center px-4 min-w-[80px]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--daw-lcd-muted))] leading-none mb-1">
+              Tempo
+            </p>
+            <input
+              type="number"
+              min={20}
+              max={300}
+              value={currentProject.bpm}
+              onChange={(event) => handleTempoChange(event.target.value)}
+              className="daw-lcd-readout w-full bg-transparent text-sm font-semibold outline-none leading-none"
+              aria-label="Project tempo"
+            />
+          </div>
+          <div className="flex flex-col justify-center px-4 min-w-[72px]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--daw-lcd-muted))] leading-none mb-1">
+              Meter
+            </p>
+            <div className="flex items-center gap-0.5 daw-lcd-readout text-sm font-semibold leading-none">
               <input
                 type="number"
-                min={20}
-                max={300}
-                value={currentProject.bpm}
-                onChange={(event) => handleTempoChange(event.target.value)}
-                className="daw-lcd-readout mt-1 w-full bg-transparent text-lg font-semibold outline-none"
-                aria-label="Project tempo"
+                min={1}
+                max={12}
+                value={beatsPerBar}
+                onChange={(event) =>
+                  handleTimeSignatureChange(
+                    "timeSignatureNumerator",
+                    event.target.value,
+                  )
+                }
+                className="w-6 bg-transparent text-center outline-none"
+                aria-label="Time signature numerator"
+              />
+              <span>/</span>
+              <input
+                type="number"
+                min={1}
+                max={16}
+                value={beatUnit}
+                onChange={(event) =>
+                  handleTimeSignatureChange(
+                    "timeSignatureDenominator",
+                    event.target.value,
+                  )
+                }
+                className="w-6 bg-transparent text-center outline-none"
+                aria-label="Time signature denominator"
               />
             </div>
-            <div className="rounded-2xl border border-white/5 bg-black/20 px-3 py-2">
-              <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
-                Meter
-              </p>
-              <div className="mt-1 flex items-center gap-1 daw-lcd-readout text-lg font-semibold">
-                <input
-                  type="number"
-                  min={1}
-                  max={12}
-                  value={beatsPerBar}
-                  onChange={(event) =>
-                    handleTimeSignatureChange(
-                      "timeSignatureNumerator",
-                      event.target.value,
-                    )
-                  }
-                  className="w-8 bg-transparent text-center outline-none"
-                  aria-label="Time signature numerator"
-                />
-                <span>/</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={16}
-                  value={beatUnit}
-                  onChange={(event) =>
-                    handleTimeSignatureChange(
-                      "timeSignatureDenominator",
-                      event.target.value,
-                    )
-                  }
-                  className="w-8 bg-transparent text-center outline-none"
-                  aria-label="Time signature denominator"
-                />
-              </div>
+          </div>
+          <div className="flex flex-col justify-center px-3 min-w-[120px]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--daw-lcd-muted))] leading-none mb-1">
+              Grid
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {GRID_DIVISIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={`rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.1em] transition ${gridDivision === option ? "bg-cyan-400/14 text-cyan-100" : "text-slate-400 hover:text-slate-200"}`}
+                  onClick={() => setGridDivision(option)}
+                >
+                  {option}
+                </button>
+              ))}
             </div>
-            <div className="rounded-2xl border border-white/5 bg-black/20 px-3 py-2">
-              <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
-                Grid
-              </p>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {GRID_DIVISIONS.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.16em] transition ${gridDivision === option ? "bg-cyan-400/14 text-cyan-100" : "bg-white/5 text-slate-400 hover:text-slate-200"}`}
-                    onClick={() => setGridDivision(option)}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/5 bg-black/20 px-3 py-2">
-              <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-[hsl(var(--daw-lcd-muted))]">
-                Position
-              </p>
-              <p className="daw-lcd-readout mt-1 text-lg font-semibold">
-                <span ref={lcdBarsBeatsRef}>
-                  {formatBarsBeats(
-                    initialTransportTime,
-                    currentProject.bpm,
-                    beatsPerBar,
-                  )}
-                </span>
-              </p>
-              <p
-                ref={lcdClockRef}
-                className="daw-lcd-readout text-[11px] text-[hsl(var(--daw-lcd-muted))]"
-              >
-                {formatClock(initialTransportTime)}
-              </p>
-            </div>
+          </div>
+          <div className="flex flex-col justify-center px-4 min-w-[100px]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[hsl(var(--daw-lcd-muted))] leading-none mb-0.5">
+              Position
+            </p>
+            <p className="daw-lcd-readout text-sm font-semibold leading-none">
+              <span ref={lcdBarsBeatsRef}>
+                {formatBarsBeats(
+                  initialTransportTime,
+                  currentProject.bpm,
+                  beatsPerBar,
+                )}
+              </span>
+            </p>
+            <p
+              ref={lcdClockRef}
+              className="daw-lcd-readout text-[9px] text-[hsl(var(--daw-lcd-muted))] leading-none mt-0.5"
+            >
+              {formatClock(initialTransportTime)}
+            </p>
           </div>
         </div>
 
         <TooltipProvider delayDuration={120}>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="mr-1 hidden rounded-full border border-white/8 bg-white/5 px-3 py-1 text-[11px] font-semibold tracking-[0.16em] text-slate-300 xl:inline-flex">
-              {isPlaying ? "Playing" : "Standby"}
-            </div>
+          <div className="ml-auto flex items-center gap-1">
             {statusMessage && (
-              <span className="mr-1 animate-in fade-in slide-in-from-right-2 text-xs font-medium tracking-wide text-cyan-300/85">
+              <span className="mr-2 animate-in fade-in slide-in-from-right-2 text-xs font-medium tracking-wide text-cyan-300/85">
                 {statusMessage}
               </span>
             )}
@@ -1228,13 +1228,13 @@ const ProjectPage = () => {
                 className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100"
               >
                 <DropdownMenuItem
-                  className="rounded-xl focus:bg-white/8"
+                  className="rounded focus:bg-white/8"
                   onClick={() => addMidiTrack()}
                 >
                   Add MIDI track
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="rounded-xl focus:bg-white/8"
+                  className="rounded focus:bg-white/8"
                   onClick={() => addAudioTrack()}
                 >
                   Add audio track
@@ -1258,7 +1258,7 @@ const ProjectPage = () => {
                 className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100"
               >
                 <DropdownMenuItem
-                  className="rounded-xl focus:bg-white/8"
+                  className="rounded focus:bg-white/8"
                   onSelect={(event) => {
                     event.preventDefault();
                     openFilePicker(midiFileInputRef.current);
@@ -1268,7 +1268,7 @@ const ProjectPage = () => {
                   Import MIDI
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="rounded-xl focus:bg-white/8"
+                  className="rounded focus:bg-white/8"
                   onSelect={(event) => {
                     event.preventDefault();
                     openFilePicker(audioFileInputRef.current);
@@ -1305,7 +1305,22 @@ const ProjectPage = () => {
               <TooltipContent>Save</TooltipContent>
             </Tooltip>
 
-            <div className="mx-1 hidden h-5 w-px bg-white/10 lg:block" />
+            <div className="mx-1 h-5 w-px bg-white/10" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HeaderActionButton
+                  label="QWERTY MIDI keyboard"
+                  active={isQwertyKeyboardOpen}
+                  onClick={() => openQwertyKeyboard()}
+                >
+                  <Keyboard className="h-4 w-4" />
+                </HeaderActionButton>
+              </TooltipTrigger>
+              <TooltipContent>QWERTY MIDI</TooltipContent>
+            </Tooltip>
+
+            <div className="mx-1 h-5 w-px bg-white/10" />
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1366,7 +1381,7 @@ const ProjectPage = () => {
         aria-hidden="true"
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.14),rgba(2,6,23,0.84)_58%)] backdrop-blur-[2px]" />
-        <div className="relative rounded-[32px] border border-cyan-300/35 bg-[linear-gradient(180deg,rgba(8,145,178,0.16),rgba(15,23,42,0.9))] px-10 py-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
+        <div className="relative rounded border border-cyan-300/35 bg-[hsl(var(--daw-surface-3))] px-10 py-8 text-center">
           <p className="text-[11px] font-black uppercase tracking-[0.28em] text-cyan-200/90">
             Import Files
           </p>
@@ -1436,7 +1451,7 @@ const ProjectPage = () => {
             <>
               <PanelResizeHandle className="group relative z-10 w-[4px] bg-[hsl(var(--daw-panel-border))] outline-none">
                 <div className="absolute inset-y-0 -inset-x-2 cursor-col-resize transition-colors group-hover:bg-cyan-500/24 group-active:bg-cyan-500/44" />
-                <div className="absolute left-1/2 top-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/12 opacity-80 transition-colors group-hover:bg-cyan-300" />
+                <div className="absolute left-1/2 top-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-sm bg-white/12 opacity-80 transition-colors group-hover:bg-cyan-300" />
               </PanelResizeHandle>
 
               <Panel
@@ -1448,18 +1463,17 @@ const ProjectPage = () => {
                 <div className="flex h-12 shrink-0 items-center border-b border-[hsl(var(--daw-panel-border))] bg-white/5 px-4">
                   <h2 className="daw-panel-title">Inspector</h2>
                 </div>
-                <div className="flex-1 overflow-y-auto overflow-x-hidden p-4">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden">
                   {selectedTrack ? (
-                    <div className="space-y-5">
-                      <div>
-                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                          <div className="h-px flex-1 bg-white/10"></div>
+                    <div>
+                      {/* Track Properties */}
+                      <div className="border-b border-white/8">
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 bg-white/6">
                           Track Properties
-                          <div className="h-px flex-1 bg-white/10"></div>
-                        </h3>
-                        <dl className="space-y-3">
-                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-3">
-                            <div className="mb-2 flex items-center justify-between">
+                        </div>
+                        <dl className="px-3 py-3 space-y-3">
+                          <div>
+                            <div className="mb-1.5 flex items-center justify-between">
                               <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                                 Instrument
                               </dt>
@@ -1489,7 +1503,7 @@ const ProjectPage = () => {
                                       });
                                   }}
                                 >
-                                  <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
+                                  <SelectTrigger className="h-8 rounded border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
                                     <SelectValue placeholder="Select an instrument" />
                                   </SelectTrigger>
                                   <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
@@ -1497,7 +1511,7 @@ const ProjectPage = () => {
                                       <SelectItem
                                         key={instrument.id}
                                         value={instrument.id}
-                                        className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                                        className="rounded py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
                                       >
                                         {instrument.name}
                                       </SelectItem>
@@ -1516,7 +1530,7 @@ const ProjectPage = () => {
                               instrument={selectedTrack.instrument}
                             />
                           ) : null}
-                          <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
+                          <div className="flex flex-col gap-2">
                             <div className="flex items-center justify-between">
                               <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                                 Volume
@@ -1541,7 +1555,7 @@ const ProjectPage = () => {
                               className="w-full"
                             />
                           </div>
-                          <div className="group flex flex-col gap-3 rounded-[22px] border border-white/8 bg-black/18 px-4 py-4 transition-colors hover:bg-white/6">
+                          <div className="flex flex-col gap-2">
                             <div className="flex items-center justify-between">
                               <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                                 Pan
@@ -1567,222 +1581,174 @@ const ProjectPage = () => {
                             />
                           </div>
                         </dl>
-                      </div>
-
-                      <div>
-                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                          <div className="h-px flex-1 bg-white/10"></div>
-                          Live Input
-                          <div className="h-px flex-1 bg-white/10"></div>
-                        </h3>
-                        <div className="space-y-3">
-                          <div className="overflow-hidden rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(30,17,26,0.92),rgba(12,16,24,0.98))] shadow-[0_20px_36px_rgba(0,0,0,0.24)]">
-                            <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-                              <div>
-                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-rose-200/90">
-                                  Input Router
-                                </p>
-                                <p className="mt-1 text-sm font-semibold text-slate-100">
-                                  {inputLabel}
-                                </p>
-                              </div>
-                              <span
-                                className={`rounded-full px-3 py-1 font-mono text-[10px] ${selectedInputMode === "qwerty" ? "bg-amber-400/12 text-amber-200" : "bg-cyan-400/12 text-cyan-100"}`}
-                              >
-                                {inputModeLabel}
-                              </span>
-                            </div>
-                            <div className="space-y-3 px-4 py-4">
-                              <div>
-                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                  Active Source
-                                </p>
-                                <Select
-                                  value={selectedInputId}
-                                  onValueChange={setMidiInputId}
+                        <div className="flex items-center justify-between gap-2 border-t border-white/8 px-3 py-2">
+                          <p className="text-[10px] text-slate-500">
+                            {selectedTrack?.type === "midi"
+                              ? "Remove track and clips"
+                              : "Select a MIDI track to delete"}
+                          </p>
+                          <AlertDialog
+                            open={isDeleteTrackDialogOpen}
+                            onOpenChange={setIsDeleteTrackDialogOpen}
+                          >
+                            <button
+                              type="button"
+                              className={`flex shrink-0 items-center justify-center gap-1.5 rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] transition-all ${selectedTrack?.type === "midi" ? "border-red-400/40 bg-red-500/12 text-red-100 hover:border-red-300/60 hover:bg-red-500/18" : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
+                              onClick={() => {
+                                if (selectedTrack?.type === "midi") {
+                                  setIsDeleteTrackDialogOpen(true);
+                                }
+                              }}
+                              disabled={selectedTrack?.type !== "midi"}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Delete
+                            </button>
+                            <AlertDialogContent className="max-w-md rounded border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100 shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-xl font-semibold tracking-tight text-slate-50">
+                                  Delete {selectedTrack?.name ?? "MIDI track"}?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription className="text-sm leading-6 text-slate-400">
+                                  This removes the track, its clips, and any
+                                  armed recording target on it. This action
+                                  cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="rounded border-white/10 bg-white/5 text-slate-200 hover:bg-white/8 hover:text-slate-50">
+                                  Cancel
+                                </AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="rounded bg-red-500 text-white hover:bg-red-500/90"
+                                  onClick={handleDeleteSelectedMidiTrack}
                                 >
-                                  <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
-                                    <SelectValue placeholder="Select live input" />
-                                  </SelectTrigger>
-                                  <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
-                                    {inputs.map((input) => (
-                                      <SelectItem
-                                        key={input.id}
-                                        value={input.id}
-                                        className="rounded-xl py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
-                                      >
-                                        {input.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              <div className="grid gap-2 sm:grid-cols-2">
-                                <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-3">
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                    Record Target
-                                  </p>
-                                  <p className="mt-1 text-sm font-semibold text-slate-100">
-                                    {armedMidiTrack?.name ??
-                                      "No armed MIDI track"}
-                                  </p>
-                                </div>
-                                <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-3">
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                    Browser Path
-                                  </p>
-                                  <p className="mt-1 text-sm font-semibold text-slate-100">
-                                    {isWebMidiSupported
-                                      ? "Web MIDI + fallback"
-                                      : "QWERTY fallback only"}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-3">
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                    Track Arm
-                                  </p>
-                                  <p className="mt-1 text-sm font-semibold text-slate-100">
-                                    {selectedTrack?.type === "midi"
-                                      ? selectedTrack.recordArmed
-                                        ? "Selected MIDI track is armed"
-                                        : "Arm the selected MIDI track for capture"
-                                      : "Select a MIDI track to arm recording"}
-                                  </p>
-                                </div>
-                                <button
-                                  type="button"
-                                  className={`flex min-w-24 items-center justify-center rounded-2xl border px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] transition-all ${selectedTrack?.type === "midi" ? (selectedTrack.recordArmed ? "border-rose-400/50 bg-rose-500/18 text-rose-100 shadow-[0_0_18px_rgba(244,63,94,0.28)]" : "border-white/10 bg-white/5 text-slate-200 hover:border-rose-400/40 hover:text-rose-100") : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
-                                  onClick={() => {
-                                    if (selectedTrack?.type === "midi") {
-                                      toggleTrackRecordArm(selectedTrack.id);
-                                    }
-                                  }}
-                                  disabled={selectedTrack?.type !== "midi"}
-                                >
-                                  {selectedTrack?.type === "midi" &&
-                                  selectedTrack.recordArmed
-                                    ? "Armed"
-                                    : "Arm"}
-                                </button>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/18 px-3 py-3">
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                    Delete Track
-                                  </p>
-                                  <p className="mt-1 text-sm font-semibold text-slate-100">
-                                    {selectedTrack?.type === "midi"
-                                      ? "Remove the selected MIDI track and its clips"
-                                      : "Select a MIDI track to delete it"}
-                                  </p>
-                                </div>
-                                <AlertDialog
-                                  open={isDeleteTrackDialogOpen}
-                                  onOpenChange={setIsDeleteTrackDialogOpen}
-                                >
-                                  <button
-                                    type="button"
-                                    className={`flex min-w-24 items-center justify-center gap-2 rounded-2xl border px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] transition-all ${selectedTrack?.type === "midi" ? "border-red-400/40 bg-red-500/12 text-red-100 hover:border-red-300/60 hover:bg-red-500/18" : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
-                                    onClick={() => {
-                                      if (selectedTrack?.type === "midi") {
-                                        setIsDeleteTrackDialogOpen(true);
-                                      }
-                                    }}
-                                    disabled={selectedTrack?.type !== "midi"}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                    Delete
-                                  </button>
-                                  <AlertDialogContent className="max-w-md rounded-[28px] border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100 shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
-                                    <AlertDialogHeader>
-                                      <AlertDialogTitle className="text-xl font-semibold tracking-tight text-slate-50">
-                                        Delete{" "}
-                                        {selectedTrack?.name ?? "MIDI track"}?
-                                      </AlertDialogTitle>
-                                      <AlertDialogDescription className="text-sm leading-6 text-slate-400">
-                                        This removes the track, its clips, and
-                                        any armed recording target on it. This
-                                        action cannot be undone.
-                                      </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                      <AlertDialogCancel className="rounded-2xl border-white/10 bg-white/5 text-slate-200 hover:bg-white/8 hover:text-slate-50">
-                                        Cancel
-                                      </AlertDialogCancel>
-                                      <AlertDialogAction
-                                        className="rounded-2xl bg-red-500 text-white hover:bg-red-500/90"
-                                        onClick={handleDeleteSelectedMidiTrack}
-                                      >
-                                        Delete Track
-                                      </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>
-                              </div>
-
-                              <p
-                                className={`text-[11px] ${supportMessage ? "text-amber-200/90" : "text-slate-400"}`}
-                              >
-                                {inputHint}
-                              </p>
-                            </div>
-                          </div>
+                                  Delete Track
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </div>
 
-                      <div>
-                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                          <div className="h-px flex-1 bg-white/10"></div>
-                          Channel Strip
-                          <div className="h-px flex-1 bg-white/10"></div>
-                        </h3>
-                        <div className="space-y-3">
-                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
-                            <div className="mb-3 flex items-center justify-between">
+                      {/* Live Input */}
+                      <div className="border-b border-white/8">
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 bg-white/6">
+                          Live Input
+                        </div>
+                        <div className="px-3 py-3 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-slate-100">
+                              {inputLabel}
+                            </p>
+                            <span
+                              className={`rounded px-2 py-0.5 font-mono text-[10px] ${selectedInputMode === "qwerty" ? "bg-amber-400/12 text-amber-200" : "bg-cyan-400/12 text-cyan-100"}`}
+                            >
+                              {inputModeLabel}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Active Source
+                            </p>
+                            <Select
+                              value={selectedInputId}
+                              onValueChange={setMidiInputId}
+                            >
+                              <SelectTrigger className="h-8 rounded border-white/10 bg-white/5 text-left text-slate-100 focus:ring-cyan-300/70 focus:ring-offset-0">
+                                <SelectValue placeholder="Select live input" />
+                              </SelectTrigger>
+                              <SelectContent className="border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100">
+                                {inputs.map((input) => (
+                                  <SelectItem
+                                    key={input.id}
+                                    value={input.id}
+                                    className="rounded py-2 pl-8 pr-3 text-sm focus:bg-white/8 focus:text-cyan-50"
+                                  >
+                                    {input.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                EQ
+                                Record Target
                               </p>
-                              <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-semibold tracking-[0.16em] text-slate-300">
-                                Preview
-                              </span>
+                              <p className="font-mono text-[11px] font-semibold text-slate-100 truncate max-w-[55%] text-right">
+                                {armedMidiTrack?.name ?? "None"}
+                              </p>
                             </div>
-                            <div className="grid grid-cols-3 gap-3">
-                              {[
-                                ["Low", "-2.0dB"],
-                                ["Mid", "+1.5dB"],
-                                ["High", "+3.0dB"],
-                              ].map(([label, value]) => (
-                                <div
-                                  key={label}
-                                  className="rounded-2xl border border-white/8 bg-white/5 p-3"
-                                >
-                                  <div className="mb-16 h-20 rounded-xl bg-[linear-gradient(180deg,rgba(34,211,238,0.12),rgba(255,255,255,0.04))]" />
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                                    {label}
-                                  </p>
-                                  <p className="mt-1 font-mono text-[11px] text-slate-200">
-                                    {value}
-                                  </p>
-                                </div>
-                              ))}
+                            <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                Protocol
+                              </p>
+                              <p className="font-mono text-[11px] font-semibold text-slate-100">
+                                {isWebMidiSupported ? "Web MIDI" : "QWERTY"}
+                              </p>
                             </div>
                           </div>
 
-                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
-                            <div className="mb-3 flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] text-slate-400 min-w-0">
+                              {selectedTrack?.type === "midi"
+                                ? selectedTrack.recordArmed
+                                  ? "Armed for capture"
+                                  : "Arm to record"
+                                : "Select a MIDI track"}
+                            </p>
+                            <button
+                              type="button"
+                              className={`flex shrink-0 items-center justify-center rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] transition-all ${selectedTrack?.type === "midi" ? (selectedTrack.recordArmed ? "border-rose-400/50 bg-rose-500/18 text-rose-100" : "border-white/10 bg-white/5 text-slate-200 hover:border-rose-400/40 hover:text-rose-100") : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
+                              onClick={() => {
+                                if (selectedTrack?.type === "midi") {
+                                  toggleTrackRecordArm(selectedTrack.id);
+                                }
+                              }}
+                              disabled={selectedTrack?.type !== "midi"}
+                            >
+                              {selectedTrack?.type === "midi" &&
+                              selectedTrack.recordArmed
+                                ? "Armed"
+                                : "Arm"}
+                            </button>
+                          </div>
+
+                          {inputHint && (
+                            <p className="text-[10px] text-amber-200/80">
+                              {inputHint}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Channel Strip */}
+                      <div className="border-b border-white/8">
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 bg-white/6">
+                          Channel Strip
+                        </div>
+                        <div className="px-3 py-3 space-y-3">
+                          <div className="flex items-center justify-between border border-dashed border-white/8 px-3 py-2.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                              EQ
+                            </p>
+                            <p className="text-[10px] text-slate-600">
+                              Coming soon
+                            </p>
+                          </div>
+
+                          <div>
+                            <div className="mb-2 flex items-center justify-between">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                                 Inserts
                               </p>
-                              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                              <span className="text-[10px] text-slate-500">
                                 4 slots
                               </span>
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-1">
                               {[
                                 "Channel EQ",
                                 "Compressor",
@@ -1791,7 +1757,7 @@ const ProjectPage = () => {
                               ].map((slot, slotIndex) => (
                                 <div
                                   key={`${slot}-${slotIndex}`}
-                                  className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
+                                  className="flex items-center justify-between border border-white/8 bg-white/3 px-3 py-2"
                                 >
                                   <span className="text-xs font-medium text-slate-200">
                                     {slot}
@@ -1804,21 +1770,21 @@ const ProjectPage = () => {
                             </div>
                           </div>
 
-                          <div className="rounded-[22px] border border-white/8 bg-black/18 p-4">
-                            <div className="mb-3 flex items-center justify-between">
+                          <div>
+                            <div className="mb-2 flex items-center justify-between">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                                 Sends
                               </p>
-                              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                              <span className="text-[10px] text-slate-500">
                                 2 slots
                               </span>
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-1">
                               {["Bus 1 Reverb", "Bus 2 Parallel Comp"].map(
                                 (slot) => (
                                   <div
                                     key={slot}
-                                    className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
+                                    className="flex items-center justify-between border border-white/8 bg-white/3 px-3 py-2"
                                   >
                                     <span className="text-xs font-medium text-slate-200">
                                       {slot}
@@ -1831,34 +1797,16 @@ const ProjectPage = () => {
                               )}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            className="rounded-2xl border border-amber-400/16 bg-[linear-gradient(180deg,rgba(250,204,21,0.12),rgba(217,119,6,0.08))] px-3 py-2 text-left shadow-[0_14px_28px_rgba(0,0,0,0.18)] transition-all hover:border-amber-300/30 hover:bg-amber-300/10"
-                            onClick={() => {
-                              openQwertyKeyboard();
-                            }}
-                          >
-                            <p className="text-[9px] font-black uppercase tracking-[0.28em] text-amber-200/90">
-                              QWERTY MIDI
-                            </p>
-                            <p className="mt-1 font-mono text-sm font-semibold text-amber-50">
-                              {typeof navigator !== "undefined" &&
-                              navigator.platform.toLowerCase().includes("mac")
-                                ? "⌘K"
-                                : "Ctrl+K"}
-                            </p>
-                          </button>
                         </div>
                       </div>
 
-                      <div>
-                        <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                          <div className="h-px flex-1 bg-white/10"></div>
+                      {/* Clip Info */}
+                      <div className="border-b border-white/8">
+                        <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 bg-white/6">
                           Clip Info
-                          <div className="h-px flex-1 bg-white/10"></div>
-                        </h3>
-                        <dl className="space-y-2">
-                          <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
+                        </div>
+                        <dl className="px-3 pt-2 space-y-0">
+                          <div className="flex items-center justify-between border-b border-white/8 py-2">
                             <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                               Notes
                             </dt>
@@ -1866,7 +1814,7 @@ const ProjectPage = () => {
                               {selectedMidiClip?.notes.length ?? 0}
                             </dd>
                           </div>
-                          <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
+                          <div className="flex items-center justify-between border-b border-white/8 py-2">
                             <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                               Start
                             </dt>
@@ -1876,7 +1824,7 @@ const ProjectPage = () => {
                                 : "00:00.00"}
                             </dd>
                           </div>
-                          <div className="group flex items-center justify-between rounded-[20px] border border-white/8 bg-black/18 px-3 py-3 transition-colors hover:bg-white/6">
+                          <div className="flex items-center justify-between border-b border-white/8 py-2">
                             <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                               Length
                             </dt>
@@ -1888,24 +1836,19 @@ const ProjectPage = () => {
                           </div>
                         </dl>
 
-                        <div className="mt-3 flex items-center justify-between gap-3 rounded-[20px] border border-white/8 bg-black/18 px-3 py-3">
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                              Delete Clip
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-slate-100">
-                              {selectedTrack?.type === "midi" && selectedClip
-                                ? "Remove the selected MIDI clip"
-                                : "Select a MIDI clip to delete it"}
-                            </p>
-                          </div>
+                        <div className="flex items-center justify-between gap-2 border-t border-white/8 px-3 py-2">
+                          <p className="text-[10px] text-slate-500">
+                            {selectedTrack?.type === "midi" && selectedClip
+                              ? "Remove selected MIDI clip"
+                              : "Select a MIDI clip"}
+                          </p>
                           <AlertDialog
                             open={isDeleteClipDialogOpen}
                             onOpenChange={setIsDeleteClipDialogOpen}
                           >
                             <button
                               type="button"
-                              className={`flex min-w-24 items-center justify-center gap-2 rounded-2xl border px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] transition-all ${selectedTrack?.type === "midi" && selectedClip ? "border-red-400/40 bg-red-500/12 text-red-100 hover:border-red-300/60 hover:bg-red-500/18" : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
+                              className={`flex shrink-0 items-center justify-center gap-1.5 rounded border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] transition-all ${selectedTrack?.type === "midi" && selectedClip ? "border-red-400/40 bg-red-500/12 text-red-100 hover:border-red-300/60 hover:bg-red-500/18" : "border-white/10 bg-white/5 text-slate-500 opacity-60"}`}
                               onClick={() => {
                                 if (
                                   selectedTrack?.type === "midi" &&
@@ -1918,10 +1861,10 @@ const ProjectPage = () => {
                                 selectedTrack?.type !== "midi" || !selectedClip
                               }
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3 w-3" />
                               Delete
                             </button>
-                            <AlertDialogContent className="max-w-md rounded-[28px] border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100 shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
+                            <AlertDialogContent className="max-w-md rounded border-white/10 bg-[hsl(var(--daw-surface-2))] text-slate-100 shadow-[0_28px_80px_rgba(0,0,0,0.45)]">
                               <AlertDialogHeader>
                                 <AlertDialogTitle className="text-xl font-semibold tracking-tight text-slate-50">
                                   Delete {selectedClip?.name ?? "MIDI clip"}?
@@ -1932,11 +1875,11 @@ const ProjectPage = () => {
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
-                                <AlertDialogCancel className="rounded-2xl border-white/10 bg-white/5 text-slate-200 hover:bg-white/8 hover:text-slate-50">
+                                <AlertDialogCancel className="rounded border-white/10 bg-white/5 text-slate-200 hover:bg-white/8 hover:text-slate-50">
                                   Cancel
                                 </AlertDialogCancel>
                                 <AlertDialogAction
-                                  className="rounded-2xl bg-red-500 text-white hover:bg-red-500/90"
+                                  className="rounded bg-red-500 text-white hover:bg-red-500/90"
                                   onClick={handleDeleteSelectedMidiClip}
                                 >
                                   Delete Clip
@@ -1948,14 +1891,12 @@ const ProjectPage = () => {
                       </div>
 
                       {aafImportMetadata && (
-                        <div>
-                          <h3 className="mb-3 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                            <div className="h-px flex-1 bg-white/10"></div>
+                        <div className="border-b border-white/8">
+                          <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 bg-white/6">
                             AAF Import
-                            <div className="h-px flex-1 bg-white/10"></div>
-                          </h3>
+                          </div>
 
-                          <div className="mb-3 rounded-[20px] border border-cyan-500/20 bg-cyan-500/5 px-3 py-3 text-[11px] text-cyan-100/80">
+                          <div className="mx-3 my-3 border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[11px] text-cyan-100/80">
                             <p className="font-semibold text-cyan-100">
                               {aafImportMetadata.summary ?? "Imported from AAF"}
                             </p>
@@ -1967,7 +1908,7 @@ const ProjectPage = () => {
 
                           {selectedAafHint ? (
                             <dl className="space-y-2">
-                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                              <div className="flex items-center justify-between border-b border-slate-800/40 py-2">
                                 <dt className="text-xs text-slate-500">
                                   Match
                                 </dt>
@@ -1975,7 +1916,7 @@ const ProjectPage = () => {
                                   {selectedAafHint.matchedBy ?? "heuristic"}
                                 </dd>
                               </div>
-                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                              <div className="flex items-center justify-between border-b border-slate-800/40 py-2">
                                 <dt className="text-xs text-slate-500">
                                   Entry
                                 </dt>
@@ -1983,7 +1924,7 @@ const ProjectPage = () => {
                                   {selectedAafHint.entryPath}
                                 </dd>
                               </div>
-                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                              <div className="flex items-center justify-between border-b border-slate-800/40 py-2">
                                 <dt className="text-xs text-slate-500">
                                   Start
                                 </dt>
@@ -2000,7 +1941,7 @@ const ProjectPage = () => {
                                   )}
                                 </dd>
                               </div>
-                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                              <div className="flex items-center justify-between border-b border-slate-800/40 py-2">
                                 <dt className="text-xs text-slate-500">
                                   Duration
                                 </dt>
@@ -2015,7 +1956,7 @@ const ProjectPage = () => {
                                   )}
                                 </dd>
                               </div>
-                              <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                              <div className="flex items-center justify-between border-b border-slate-800/40 py-2">
                                 <dt className="text-xs text-slate-500">Rate</dt>
                                 <dd className="text-right text-[11px] font-semibold text-slate-200">
                                   {selectedAafHint.rate
@@ -2024,7 +1965,7 @@ const ProjectPage = () => {
                                 </dd>
                               </div>
                               {selectedAafHint.slotId !== undefined && (
-                                <div className="group flex items-center justify-between rounded-lg border border-slate-800/40 bg-slate-900/40 px-3 py-2.5 transition-colors hover:bg-slate-800/40">
+                                <div className="flex items-center justify-between border-b border-slate-800/40 py-2">
                                   <dt className="text-xs text-slate-500">
                                     Slot ID
                                   </dt>
@@ -2035,7 +1976,7 @@ const ProjectPage = () => {
                               )}
                             </dl>
                           ) : (
-                            <div className="rounded-lg border border-dashed border-slate-800/60 px-3 py-3 text-xs text-slate-500">
+                            <div className="border border-dashed border-slate-800/60 px-3 py-3 text-xs text-slate-500">
                               No track-specific AAF hint matched the current
                               selection.
                             </div>
@@ -2044,8 +1985,25 @@ const ProjectPage = () => {
                       )}
                     </div>
                   ) : (
-                    <div className="mt-8 text-center text-xs text-slate-400">
-                      Select a track to inspect it.
+                    <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-8 w-8 text-slate-700"
+                        aria-hidden="true"
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="1" />
+                        <path d="M15 3v18" />
+                        <path d="M7 8h5M7 12h4M7 16h3" />
+                      </svg>
+                      <div>
+                        <p className="text-xs font-semibold text-slate-500">No track selected</p>
+                        <p className="mt-1 text-[10px] text-slate-600">Select a track to view its properties</p>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2055,7 +2013,7 @@ const ProjectPage = () => {
         </PanelGroup>
       </div>
 
-      <div className="z-20 shrink-0 border-t border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(11,17,28,0.96),rgba(9,13,22,0.98))] shadow-[0_-10px_40px_rgba(0,0,0,0.3)]">
+      <div className="z-20 shrink-0 border-t border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-surface-1))]">
         <TransportBar
           duration={currentProject.duration}
           inputLabel={inputLabel}
