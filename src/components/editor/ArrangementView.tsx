@@ -36,8 +36,8 @@ interface ArrangementViewProps {
 
 const getClipGradient = (isAudio: boolean) =>
   isAudio
-    ? "linear-gradient(180deg, rgba(251, 146, 60, 0.96) 0%, rgba(194, 65, 12, 0.88) 100%)"
-    : "linear-gradient(180deg, rgba(103, 232, 249, 0.96) 0%, rgba(8, 145, 178, 0.88) 100%)";
+    ? "rgba(251, 146, 60, 0.28)"
+    : "rgba(34, 211, 238, 0.22)";
 
 const resolveTrackColor = (trackColor: string | undefined, isAudio: boolean) =>
   `hsl(${trackColor ?? (isAudio ? "24 96% 63%" : "190 92% 56%")})`;
@@ -271,8 +271,8 @@ export const ArrangementView = ({
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-[linear-gradient(180deg,hsl(var(--daw-surface-3)),hsl(var(--daw-surface-2)))] text-slate-100">
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(38,45,61,0.96),rgba(24,29,41,0.96))] px-3">
+    <div className="flex h-full flex-col overflow-hidden bg-[hsl(var(--daw-surface-2))] text-slate-100">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-surface-3))] px-3">
         <div className="flex items-center gap-3">
           <h2 className="daw-panel-title text-slate-300">Arrangement</h2>
           <div className="h-4 w-px bg-white/12" />
@@ -281,10 +281,10 @@ export const ArrangementView = ({
             {formatTime(duration)}
           </p>
         </div>
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/20 p-1 shadow-[0_8px_24px_rgba(0,0,0,0.18)]">
+        <div className="flex items-center gap-1 border border-white/10 bg-black/20 p-1">
           <button
             type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-cyan-300 disabled:opacity-40"
+            className="flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-cyan-300 disabled:opacity-40"
             onClick={() =>
               setZoom((current) => Math.max(MIN_ZOOM, current - 8))
             }
@@ -298,7 +298,7 @@ export const ArrangementView = ({
           </div>
           <button
             type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-cyan-300 disabled:opacity-40"
+            className="flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-cyan-300 disabled:opacity-40"
             onClick={() =>
               setZoom((current) => Math.min(MAX_ZOOM, current + 8))
             }
@@ -325,7 +325,7 @@ export const ArrangementView = ({
           }}
         >
           <div
-            className="sticky left-0 top-0 z-40 flex items-center justify-between border-b border-r border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(32,38,50,0.98),rgba(24,29,40,0.98))] px-4"
+            className="sticky left-0 top-0 z-40 flex items-center justify-between border-b border-r border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-surface-3))] px-4"
             style={{
               width: `${TRACK_HEADER_WIDTH}px`,
               height: `${RULER_HEIGHT}px`,
@@ -337,13 +337,13 @@ export const ArrangementView = ({
                 Unified scroll for headers and clips
               </p>
             </div>
-            <span className="rounded-full bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">
+            <span className="rounded-sm bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">
               {currentProject.tracks.length}
             </span>
           </div>
 
           <div
-            className="sticky top-0 z-30 h-[34px] overflow-hidden border-b border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(34,40,54,0.98),rgba(27,32,44,0.98))]"
+            className="sticky top-0 z-30 h-[34px] overflow-hidden border-b border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-surface-3))]"
             style={{
               marginLeft: `${TRACK_HEADER_WIDTH}px`,
               width: `${canvasWidth}px`,
@@ -380,7 +380,7 @@ export const ArrangementView = ({
 
           {currentProject.tracks.length === 0 ? (
             <div className="flex min-h-[280px] items-center justify-center px-6 pb-8 pt-16">
-              <div className="rounded-3xl border border-dashed border-white/10 bg-black/18 px-10 py-12 text-center shadow-[0_20px_40px_rgba(0,0,0,0.22)]">
+              <div className="border border-dashed border-white/10 bg-black/18 px-10 py-12 text-center">
                 <p className="font-display text-lg text-slate-100">
                   No tracks in the arrangement
                 </p>
@@ -439,7 +439,7 @@ export const ArrangementView = ({
                     style={{ height: `${TRACK_HEIGHT}px` }}
                   >
                     <div
-                      className="sticky left-0 z-20 shrink-0 border-r border-[hsl(var(--daw-panel-border))] bg-[linear-gradient(180deg,rgba(21,27,38,0.98),rgba(15,19,28,0.98))] shadow-[18px_0_32px_rgba(0,0,0,0.18)]"
+                      className="sticky left-0 z-20 shrink-0 border-r border-[hsl(var(--daw-panel-border))] bg-[hsl(var(--daw-surface-3))]"
                       style={{ width: `${TRACK_HEADER_WIDTH}px` }}
                     >
                       <div
@@ -459,14 +459,14 @@ export const ArrangementView = ({
                         }}
                       >
                         <div
-                          className="absolute inset-y-2 left-0 w-1 rounded-r-full"
+                          className="absolute inset-y-2 left-0 w-1"
                           style={{ backgroundColor: trackColor }}
                         />
                         <div className="mb-3 flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="mb-1 flex items-center gap-2">
                               <span
-                                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/10 text-[10px] font-bold uppercase text-slate-100"
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-sm border border-white/10 text-[9px] font-bold uppercase text-slate-100"
                                 style={{ backgroundColor: trackColor }}
                               >
                                 {track.type === "audio" ? "A" : "M"}
@@ -486,7 +486,7 @@ export const ArrangementView = ({
                           </div>
                           <button
                             type="button"
-                            className="shrink-0 rounded-full p-1 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
+                            className="shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
                             onClick={(event) => {
                               event.stopPropagation();
                               removeTrack(track.id);
@@ -514,7 +514,7 @@ export const ArrangementView = ({
                             {track.type === "midi" && (
                               <button
                                 type="button"
-                                className={`flex h-6 min-w-8 items-center justify-center rounded-full border px-2 text-[9px] font-bold tracking-[0.18em] transition-all ${track.recordArmed ? "border-rose-400/50 bg-rose-500/20 text-rose-100 shadow-[0_0_18px_rgba(244,63,94,0.22)]" : "border-white/10 bg-black/20 text-slate-400 hover:text-rose-100"}`}
+                                className={`flex h-5 min-w-7 items-center justify-center rounded-sm border px-1.5 text-[9px] font-bold tracking-[0.1em] transition-all ${track.recordArmed ? "border-rose-400/50 bg-rose-500/20 text-rose-100" : "border-white/10 bg-black/20 text-slate-400 hover:text-rose-100"}`}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   toggleTrackRecordArm(track.id);
@@ -533,7 +533,7 @@ export const ArrangementView = ({
                             )}
                             <button
                               type="button"
-                              className={`flex h-6 w-6 items-center justify-center rounded-full border text-[9px] font-bold transition-all ${track.muted ? "border-red-500/40 bg-red-500/20 text-red-200" : "border-white/10 bg-black/20 text-slate-400 hover:text-slate-200"}`}
+                              className={`flex h-5 w-5 items-center justify-center rounded-sm border text-[9px] font-bold transition-all ${track.muted ? "border-red-500/40 bg-red-500/20 text-red-200" : "border-white/10 bg-black/20 text-slate-400 hover:text-slate-200"}`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 updateTrack(track.id, { muted: !track.muted });
@@ -544,7 +544,7 @@ export const ArrangementView = ({
                             </button>
                             <button
                               type="button"
-                              className={`flex h-6 w-6 items-center justify-center rounded-full border text-[9px] font-bold transition-all ${track.solo ? "border-yellow-500/40 bg-yellow-500/20 text-yellow-100" : "border-white/10 bg-black/20 text-slate-400 hover:text-slate-200"}`}
+                              className={`flex h-5 w-5 items-center justify-center rounded-sm border text-[9px] font-bold transition-all ${track.solo ? "border-yellow-500/40 bg-yellow-500/20 text-yellow-100" : "border-white/10 bg-black/20 text-slate-400 hover:text-slate-200"}`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 updateTrack(track.id, { solo: !track.solo });
@@ -610,7 +610,7 @@ export const ArrangementView = ({
                           <div key={clip.id}>
                             {showGhost && (
                               <div
-                                className="pointer-events-none absolute bottom-1 top-1 rounded-xl border border-dashed border-cyan-100/75 bg-cyan-200/12 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+                                className="pointer-events-none absolute bottom-1 top-1 rounded-sm border border-dashed border-cyan-100/75 bg-cyan-200/12"
                                 style={{
                                   left: `${renderedStartTime * zoom}px`,
                                   width: `${Math.max(renderedDuration * zoom, 36)}px`,
@@ -619,7 +619,7 @@ export const ArrangementView = ({
                             )}
                             <button
                               type="button"
-                              className={`absolute bottom-1 top-1 overflow-hidden rounded-xl border px-0 text-left text-xs shadow-[0_14px_26px_rgba(2,6,23,0.24)] transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80 ${isClipSelected ? "z-10 border-cyan-100 ring-2 ring-cyan-300/45" : "border-black/25 hover:brightness-110"} ${activeTool === "split" ? "cursor-cell" : activeTool === "trim" ? "cursor-col-resize" : "cursor-grab active:cursor-grabbing"} ${showGhost ? "opacity-45" : "opacity-100"}`}
+                              className={`absolute bottom-1 top-1 overflow-hidden rounded-sm border px-0 text-left text-xs transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80 ${isClipSelected ? "z-10 border-cyan-100 ring-2 ring-cyan-300/45" : "border-black/25 hover:brightness-110"} ${activeTool === "split" ? "cursor-cell" : activeTool === "trim" ? "cursor-col-resize" : "cursor-grab active:cursor-grabbing"} ${showGhost ? "opacity-45" : "opacity-100"}`}
                               style={{
                                 left: `${clip.startTime * zoom}px`,
                                 width: `${Math.max(clip.duration * zoom, 36)}px`,
@@ -636,14 +636,14 @@ export const ArrangementView = ({
                                 className="pointer-events-none absolute inset-y-0 left-0 w-1"
                                 style={{ backgroundColor: trackColor }}
                               />
-                              <div className="pointer-events-none absolute inset-y-1 left-0 w-2 rounded-l-xl bg-white/10" />
-                              <div className="pointer-events-none absolute inset-y-1 right-0 w-2 rounded-r-xl bg-white/10" />
+                              <div className="pointer-events-none absolute inset-y-1 left-0 w-2 bg-white/10" />
+                              <div className="pointer-events-none absolute inset-y-1 right-0 w-2 bg-white/10" />
                               <div className="flex h-full flex-col justify-between">
                                 <div className="flex items-start justify-between gap-2 px-2 pt-1.5">
                                   <span className="truncate font-semibold tracking-wide text-white/95">
                                     {clip.name}
                                   </span>
-                                  <span className="rounded-full border border-white/15 bg-black/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-white/80">
+                                  <span className="rounded-sm border border-white/15 bg-black/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-white/80">
                                     {isAudio ? "Audio" : "Midi"}
                                   </span>
                                 </div>
@@ -655,7 +655,7 @@ export const ArrangementView = ({
                                       .map((value: number, index: number) => (
                                         <div
                                           key={`${clip.id}-${index}`}
-                                          className="w-full rounded-full bg-white/80"
+                                          className="w-full bg-white/80"
                                           style={{
                                             height: `${Math.max(8, value * 100)}%`,
                                           }}
@@ -663,7 +663,7 @@ export const ArrangementView = ({
                                       ))}
                                   </div>
                                 ) : clipNotes.length > 0 ? (
-                                  <div className="relative mx-2 mb-2 h-8 overflow-hidden rounded-md bg-black/10">
+                                  <div className="relative mx-2 mb-2 h-8 overflow-hidden bg-black/10">
                                     {clipNotes.slice(0, 18).map((note: MidiClip["notes"][number]) => {
                                       const left =
                                         (note.startTime /

@@ -8,6 +8,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { requestAudioContextUnlock } from "@/audio/audioContextEvents";
 import { useTransport } from "@/hooks/useTransport";
 import {
@@ -116,14 +117,15 @@ const TransportBar = ({
 
   return (
     <section
-      className="flex min-h-[72px] w-full items-center gap-5 px-4 py-3 text-slate-300"
+      className="flex h-14 w-full shrink-0 items-center gap-0 px-4 text-slate-300"
       onPointerDownCapture={() => requestAudioContextUnlock()}
       onKeyDownCapture={() => requestAudioContextUnlock()}
     >
-      <div className="flex shrink-0 items-center gap-1.5">
+      {/* Left: Transport controls */}
+      <div className="flex shrink-0 items-center gap-1">
         <button
           type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/5 text-slate-400 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-400 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded text-slate-400 transition hover:bg-white/8 hover:text-cyan-400 active:scale-95"
           onClick={() => rewind()}
           title="Rewind"
         >
@@ -131,7 +133,7 @@ const TransportBar = ({
         </button>
         <button
           type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/5 text-slate-400 transition-all hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-400 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded text-slate-400 transition hover:bg-white/8 hover:text-cyan-400 active:scale-95"
           onClick={() => stop()}
           title="Stop"
         >
@@ -139,7 +141,7 @@ const TransportBar = ({
         </button>
         <button
           type="button"
-          className={`flex h-11 w-11 items-center justify-center rounded-full transition-all active:scale-95 ${isPlaying ? "bg-cyan-400 text-[#08111d] shadow-[0_0_18px_rgba(34,211,238,0.4)]" : "bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25"}`}
+          className={`flex h-10 w-10 items-center justify-center rounded transition active:scale-95 ${isPlaying ? "bg-cyan-400 text-[#08111d] shadow-[0_0_14px_rgba(34,211,238,0.35)]" : "bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25"}`}
           onClick={() => togglePlayback()}
           title={isPlaying ? "Pause" : "Play"}
         >
@@ -151,7 +153,7 @@ const TransportBar = ({
         </button>
         <button
           type="button"
-          className={`ml-1 flex h-10 min-w-14 items-center justify-center rounded-2xl border px-3 text-[10px] font-black uppercase tracking-[0.24em] transition-all active:scale-95 ${isRecording ? "border-rose-400/40 bg-rose-500/18 text-rose-100 shadow-[0_0_18px_rgba(244,63,94,0.28)]" : recordEnabled ? "border-white/8 bg-white/5 text-slate-300 hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-100" : "border-white/8 bg-white/5 text-slate-500 opacity-60"}`}
+          className={`ml-1 flex h-9 min-w-12 items-center justify-center rounded border px-3 text-[10px] font-black uppercase tracking-[0.24em] transition active:scale-95 ${isRecording ? "border-rose-400/40 bg-rose-500/18 text-rose-100" : recordEnabled ? "border-white/8 bg-white/5 text-slate-300 hover:border-rose-500/40 hover:text-rose-100" : "border-white/8 bg-white/5 text-slate-500 opacity-60"}`}
           onClick={onToggleRecording}
           title={isRecording ? "Stop recording" : "Start recording"}
           aria-pressed={isRecording}
@@ -159,10 +161,10 @@ const TransportBar = ({
         >
           REC
         </button>
-        <div className="mx-1 h-6 w-px bg-slate-800" />
+        <div className="mx-2 h-5 w-px bg-slate-800" />
         <button
           type="button"
-          className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-all active:scale-95 ${isLoopEnabled ? "border border-cyan-500/30 bg-cyan-500/20 text-cyan-200" : "border border-white/8 bg-white/5 text-slate-400 hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-400"}`}
+          className={`flex h-9 w-9 items-center justify-center rounded transition active:scale-95 ${isLoopEnabled ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:bg-white/8 hover:text-cyan-400"}`}
           onClick={() => setLoopEnabled(!isLoopEnabled)}
           title="Toggle Loop"
         >
@@ -170,17 +172,20 @@ const TransportBar = ({
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col justify-center rounded-[24px] border border-white/8 bg-black/18 px-4 py-3">
-        <div className="mb-2 flex items-center justify-between font-mono text-[11px] font-medium tracking-[0.12em] text-slate-400">
-          <span ref={currentTimeRef} className="text-cyan-100">
-            {formatTime(initialTime)}
-          </span>
-          <span>{formatTime(duration)}</span>
-        </div>
-        <div className="group relative h-2 w-full cursor-pointer overflow-hidden rounded-full border border-white/6 bg-black/35">
+      <div className="mx-3 h-5 w-px shrink-0 bg-slate-800" />
+
+      {/* Center: Time + Progress */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span
+          ref={currentTimeRef}
+          className="shrink-0 daw-lcd-readout text-lg font-bold tabular-nums leading-none"
+        >
+          {formatTime(initialTime)}
+        </span>
+        <div className="group relative h-1.5 flex-1 cursor-default overflow-hidden border border-slate-800 bg-black/35">
           <div
             ref={progressFillRef}
-            className="absolute inset-y-0 left-0 bg-[linear-gradient(90deg,rgba(34,211,238,0.95),rgba(103,232,249,0.7))] group-hover:bg-cyan-300"
+            className="absolute inset-y-0 left-0 bg-cyan-500/70"
             style={{
               width: "100%",
               transform: `scaleX(${Math.min(1, initialTime / Math.max(duration, 0.001))})`,
@@ -188,20 +193,58 @@ const TransportBar = ({
             }}
           />
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] tracking-[0.08em] text-slate-500">
-          <span ref={transportStatsRef}>UI 0fps / jitter 0.0ms</span>
-          <span ref={workerStatsRef}>Worker 0ms / jitter 0.0ms</span>
-          <span ref={longTaskStatsRef}>Long tasks 0 / 0ms</span>
-          <span className={isRecording ? "text-rose-300" : "text-slate-500"}>
-            {isRecording ? "Recording live MIDI" : "Record ready"}
-          </span>
-        </div>
+        <span className="shrink-0 font-mono text-xs tabular-nums text-slate-500">
+          {formatTime(duration)}
+        </span>
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(15,23,35,0.76),rgba(10,15,25,0.96))] px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.18)]">
+      {/* Hidden debug refs — preserved for diagnostic subscriptions */}
+      <span ref={transportStatsRef} className="hidden" aria-hidden="true" />
+      <span ref={workerStatsRef} className="hidden" aria-hidden="true" />
+      <span ref={longTaskStatsRef} className="hidden" aria-hidden="true" />
+
+      <div className="mx-3 h-5 w-px shrink-0 bg-slate-800" />
+
+      {/* Loop IN / OUT */}
+      <div className="flex shrink-0 items-center gap-1.5">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+          IN
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={duration}
+          step={0.25}
+          value={loopStart}
+          onChange={(event) =>
+            setLoopPoints(Number(event.target.value), loopEnd)
+          }
+          className="h-7 w-14 appearance-none border border-slate-800 bg-black/25 px-2 font-mono text-[11px] text-slate-200 outline-none transition-colors focus:border-cyan-500/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <span className="text-slate-700">–</span>
+        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+          OUT
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={duration}
+          step={0.25}
+          value={loopEnd}
+          onChange={(event) =>
+            setLoopPoints(loopStart, Number(event.target.value))
+          }
+          className="h-7 w-14 appearance-none border border-slate-800 bg-black/25 px-2 font-mono text-[11px] text-slate-200 outline-none transition-colors focus:border-cyan-500/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+      </div>
+
+      <div className="mx-3 h-5 w-px shrink-0 bg-slate-800" />
+
+      {/* Master Volume */}
+      <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
-          className={`flex h-10 w-10 items-center justify-center rounded-full border transition-all active:scale-95 ${isMasterMuted || masterVolume === 0 ? "border-rose-500/30 bg-rose-500/15 text-rose-300" : "border-white/10 bg-black/25 text-slate-300 hover:border-cyan-500/40 hover:text-cyan-200"}`}
+          className={`flex h-8 w-8 items-center justify-center rounded transition active:scale-95 ${isMasterMuted || masterVolume === 0 ? "text-rose-300" : "text-slate-400 hover:text-cyan-300"}`}
           onClick={() => {
             requestAudioContextUnlock();
             toggleMasterMute();
@@ -215,93 +258,54 @@ const TransportBar = ({
             <Volume2 className="h-4 w-4" />
           )}
         </button>
-
-        <div className="flex min-w-40 flex-col gap-1">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+        <div className="flex w-32 flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
               Master
             </span>
             <span
-              className={`font-mono text-[11px] font-semibold ${isMasterMuted ? "text-rose-300" : "text-cyan-100"}`}
+              className={`font-mono text-[10px] ${isMasterMuted ? "text-rose-300" : "text-cyan-200"}`}
             >
               {isMasterMuted ? "Muted" : formatVolume(masterVolume)}
             </span>
           </div>
-          <input
-            type="range"
+          <Slider
             min={0}
             max={100}
             step={1}
-            value={Math.round(masterVolume * 100)}
+            value={[Math.round(masterVolume * 100)]}
             onPointerDown={() => requestAudioContextUnlock()}
-            onChange={(event) => {
+            onValueChange={(value) => {
               requestAudioContextUnlock();
-              const nextVolume = Number(event.target.value) / 100;
+              const nextVolume = (value[0] ?? 0) / 100;
               setMasterVolume(nextVolume);
-              setMasterMuted(nextVolume === 0 ? true : false);
+              setMasterMuted(nextVolume === 0);
             }}
-            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-black/35 accent-cyan-400"
             aria-label="Master volume"
           />
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-4 rounded-[24px] border border-white/8 bg-black/18 px-4 py-3 max-w-sm">
-        <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-          Loop
-        </label>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-semibold text-slate-600">IN</span>
-            <input
-              type="number"
-              min={0}
-              max={duration}
-              step={0.25}
-              value={loopStart}
-              onChange={(event) =>
-                setLoopPoints(Number(event.target.value), loopEnd)
-              }
-              className="h-8 w-16 rounded-xl border border-white/8 bg-black/25 px-2 font-mono text-[11px] text-slate-200 outline-none transition-colors focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50"
-            />
-          </div>
-          <span className="text-slate-700">-</span>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-semibold text-slate-600">OUT</span>
-            <input
-              type="number"
-              min={0}
-              max={duration}
-              step={0.25}
-              value={loopEnd}
-              onChange={(event) =>
-                setLoopPoints(loopStart, Number(event.target.value))
-              }
-              className="h-8 w-16 rounded-xl border border-white/8 bg-black/25 px-2 font-mono text-[11px] text-slate-200 outline-none transition-colors focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50"
-            />
-          </div>
-        </div>
-      </div>
+      <div className="mx-3 h-5 w-px shrink-0 bg-slate-800" />
 
-      <div className="flex min-w-[240px] shrink-0 flex-col gap-2 rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(24,16,22,0.82),rgba(10,13,22,0.96))] px-4 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.18)]">
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-            Live Input
-          </span>
-          <span
-            className={`rounded-full px-2 py-1 font-mono text-[10px] ${inputModeLabel === "QWERTY" ? "bg-amber-400/10 text-amber-200" : "bg-cyan-400/10 text-cyan-100"}`}
-          >
-            {inputModeLabel}
-          </span>
-        </div>
-        <p className="truncate text-sm font-semibold text-slate-100">
+      {/* Live Input */}
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+          Input
+        </span>
+        <span
+          className={`rounded px-2 py-0.5 font-mono text-[10px] ${inputModeLabel === "QWERTY" ? "bg-amber-400/10 text-amber-200" : "bg-cyan-400/10 text-cyan-100"}`}
+        >
+          {inputModeLabel}
+        </span>
+        <p className="max-w-[140px] truncate text-xs font-medium text-slate-300">
           {inputLabel}
         </p>
-        <p
-          className={`min-h-[1.25rem] text-[11px] ${supportMessage ? "text-amber-200/90" : "text-slate-500"}`}
-        >
-          {supportMessage ?? "Realtime monitoring and MIDI capture are ready."}
-        </p>
+        {supportMessage && (
+          <p className="max-w-[160px] truncate text-[10px] text-amber-200/80">
+            {supportMessage}
+          </p>
+        )}
       </div>
     </section>
   );
