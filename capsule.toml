@@ -1,0 +1,23 @@
+schema_version = "0.3"
+name = "browser-daw"
+version = "0.2.0"
+type = "app"
+
+# Distribute as a node app: install + build at materialization time, then
+# serve dist/ from a tiny in-tree Node static file server. This avoids
+# committing the `dist/` build output to GitHub and decouples the capsule
+# from the runtime=web/static + payload.rs entrypoint-clearing path
+# that requires ato CLI >= 0.4.104. Reference: byok-ai-chat sample at
+# crates/ato-cli/samples/byok-ai-chat/capsule.toml.
+runtime = "web/node"
+runtime_version = "20"
+run = "scripts/serve.mjs"
+port = 4173
+
+build = "pnpm install --frozen-lockfile && pnpm build"
+
+[metadata]
+display_name = "Browser DAW"
+description  = "Browser-based Digital Audio Workstation built with React + Web Audio API"
+author       = "Koh0920"
+tags         = ["audio", "daw", "music", "web-audio", "react"]
