@@ -1,28 +1,23 @@
 schema_version = "0.3"
 name = "browser-daw"
-version = "0.1.1"
+version = "0.2.0"
 type = "app"
 
-# Flat v0.3 form: top-level `runtime` + `run` + `port`. The v0.3 manifest
-# normalizer (capsule-core `normalize_v03_target_table`) translates this
-# into a `[targets.app]` table at validation time, including the
-# `run = "dist"` → `entrypoint = "dist"` rewrite that the web/static
-# packer requires. Using `[targets.<label>]` directly would bypass that
-# normalization and the packer would fail with
-# `runtime=web target requires entrypoint`.
-#
-# This declares the web surface so the desktop's display-strategy
-# resolver (`app_control::session::display_strategy_for_runtime`)
-# routes the launch through `WebUrl` instead of falling through to
-# `TerminalStream`. The 0.1.0 artifact had no committed manifest,
-# inferred to `runtime=source, driver=node, no port` and consequently
-# mounted as a terminal_stream pane.
-runtime = "web/static"
-run = "dist"
+# Distribute as a node app: install + build at materialization time, then
+# serve dist/ from a tiny in-tree Node static file server. This avoids
+# committing the `dist/` build output to GitHub and decouples the capsule
+# from the runtime=web/static + payload.rs entrypoint-clearing path
+# that requires ato CLI >= 0.4.104. Reference: byok-ai-chat sample at
+# crates/ato-cli/samples/byok-ai-chat/capsule.toml.
+runtime = "web/node"
+runtime_version = "20"
+run = "scripts/serve.mjs"
 port = 4173
+
+build = "pnpm install --frozen-lockfile && pnpm build"
 
 [metadata]
 display_name = "Browser DAW"
-description = "Browser-based Digital Audio Workstation built with React + Web Audio API"
-author = "Koh0920"
-tags = ["audio", "daw", "music", "web-audio", "react"]
+description  = "Browser-based Digital Audio Workstation built with React + Web Audio API"
+author       = "Koh0920"
+tags         = ["audio", "daw", "music", "web-audio", "react"]
