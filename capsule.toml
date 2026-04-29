@@ -1,0 +1,23 @@
+schema_version = "0.3"
+name = "browser-daw"
+version = "0.1.0"
+type = "app"
+default_target = "default"
+
+[metadata]
+display_name = "Browser DAW"
+description = "Browser-based Digital Audio Workstation built with React + Web Audio API"
+author = "Koh0920"
+tags = ["audio", "daw", "music", "web-audio", "react"]
+
+# Web/static surface: serve the prebuilt Vite output from `dist/`.
+# This is the contract the desktop's display-strategy resolver
+# (ato-cli `display_strategy_for_runtime`) needs in order to route
+# the launch through the WebUrl branch instead of falling through
+# to TerminalStream — which is what happened previously and caused
+# the capsule to mount as a terminal_stream pane with a PTY.
+[targets.default]
+runtime = "web"
+driver = "static"
+run = "dist"
+port = 4173
