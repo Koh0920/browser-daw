@@ -1,6 +1,6 @@
 {
   "name": "browser-daw",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A browser-based Digital Audio Workstation (DAW) built with React, TypeScript, and the Web Audio API",
   "author": "Koh0920",
   "license": "MIT",
